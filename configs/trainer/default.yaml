@@ -1,0 +1,12 @@
+max_epochs: 100
+device: auto          # auto | cpu | cuda | cuda:0
+amp: false            # mixed precision (only active on cuda)
+grad_accum_steps: 1
+grad_clip: 1.0        # max grad norm; set 0 to disable
+log_interval: 1      # in optimizer steps
+val_interval: 1       # in epochs
+ckpt_interval: 1      # in epochs (used when no validation runs that epoch)
+ckpt_dir: checkpoints # relative to the Hydra run dir
+resume: null          # absolute path to a last.pt to resume from
+progress: true        # show tqdm progress bars (set false for CI / log files)
+seed: 42

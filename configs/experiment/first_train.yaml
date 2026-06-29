@@ -1,0 +1,24 @@
+# @package _global_
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /data: shape_vae
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4          
+
+trainer:
+  val_interval: 1   
+  amp: true              
+
+data:                    # obj_root/cache_dir/mode 由 data/shape_vae.yaml 提供;這裡只凍結取樣
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0

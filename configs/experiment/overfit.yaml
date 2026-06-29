@@ -1,0 +1,33 @@
+# @package _global_
+# 用法:uv run python main.py +experiment=overfit
+# 把單一 mesh overfit 需要的所有 override 收在這一個檔(取代散落在各 group 的 overfit 變體)。
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /data: shape_vae
+  # 想讓 LR 固定(更貼近 overfit)再打開這行:
+  # - override /scheduler: null
+
+optimizer:               # 疊在 adamw 之上(保留 _target_/_partial_/betas)
+  lr: 1e-4               # 1e-3 會發散(實測 loss 衝到上千);1e-4 才穩定下降
+  weight_decay: 0        # 關掉 weight decay,別擋住擬合
+
+task:                    # 疊在 vae 之上(保留 _target_)
+  kl_weight: 0           # 關掉 KL,先確認重建能力
+
+trainer:
+  val_interval: 999999   # 實質關掉 val(overfit 只看 train loss)
+  amp: true              # 啟用 autocast(runner 用 bf16)以塞進 GPU 記憶體
+
+preprocess:              # 疊在 default 之上,只縮小取樣量加速每個 epoch
+  num_surface_samples: 20000
+  n_query_surface: 2000
+  n_query_uniform: 500
+
+data:                    # obj_root/cache_dir/mode 由 data/shape_vae.yaml 提供;這裡只凍結取樣
+  train:
+    dataset:
+      fixed_seed: 0      # 固定每個 epoch 的取樣 → 資料不再變動,才能乾淨收斂
+  val:
+    dataset:
+      fixed_seed: 0

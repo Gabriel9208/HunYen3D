@@ -1,0 +1,15 @@
+defaults:
+  - model: shape_vae
+  - task: vae
+  - data: shape_vae
+  - optimizer: adamw
+  - scheduler: cosine
+  - trainer: default
+  - wandb: default
+  - preprocess: default
+  - _self_
+
+# Run each job from its own output dir, so checkpoints/ and logs are isolated per run.
+hydra:
+  job:
+    chdir: true
