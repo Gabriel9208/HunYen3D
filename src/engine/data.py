@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import glob
 import os
-from pathlib import Path
 
 import torch
 from torch.utils.data import Dataset
@@ -46,6 +45,7 @@ class ObjMeshDataset(Dataset):
         )
         if not self.paths:
             raise FileNotFoundError(f"No meshes matching {pattern!r} under {obj_root!r}")
+        self.obj_root = obj_root
         self.preprocessor = preprocessor
         self.mode = mode
         self.cache_dir = cache_dir
@@ -63,7 +63,9 @@ class ObjMeshDataset(Dataset):
         return len(self.paths)
 
     def _cache_path(self, mesh_path: str) -> str:
-        return os.path.join(self.cache_dir, Path(mesh_path).stem + ".pt")
+        # 與 scripts/build_cache.py 一致:鏡像 obj_root 的相對路徑,避免同名 mesh 對到同一份快取。
+        rel = os.path.relpath(mesh_path, self.obj_root)
+        return os.path.join(self.cache_dir, os.path.splitext(rel)[0] + ".pt")
 
     def __getitem__(self, idx: int):
         if self.fixed_seed is not None:

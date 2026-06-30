@@ -16,7 +16,6 @@ from __future__ import annotations
 import glob
 import os
 import sys
-from pathlib import Path
 
 # 讓 `scripts/` 底下執行也能 import 到 repo 根目錄的 `src`
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,18 +29,22 @@ from tqdm.auto import tqdm
 from src.engine.utils import set_seed
 
 
-def _build_split(preprocessor, obj_root: str, cache_dir: str, force: bool) -> None:
+def _build_split(preprocessor, obj_root: str, cache_dir: str, force: bool,
+                 pattern: str) -> None:
     os.makedirs(cache_dir, exist_ok=True)
-    paths = sorted(glob.glob(os.path.join(obj_root, "**", "*.obj"), recursive=True))
+    paths = sorted(glob.glob(os.path.join(obj_root, "**", pattern), recursive=True))
     if not paths:
-        print(f"[build_cache] 警告:{obj_root} 下沒有 .obj,略過")
+        print(f"[build_cache] 警告:{obj_root} 下沒有符合 {pattern!r} 的 mesh,略過")
         return
 
     for idx, p in enumerate(tqdm(paths, desc=f"build {obj_root}")):
-        out = os.path.join(cache_dir, Path(p).stem + ".pt")
+        # 鏡像 obj_root 的相對路徑(換成 .pt),避免不同子目錄同名(如 ShapeNet hash 重名)互相覆蓋。
+        rel = os.path.relpath(p, obj_root)
+        out = os.path.join(cache_dir, os.path.splitext(rel)[0] + ".pt")
         if os.path.exists(out) and not force:
             continue
         set_seed(idx)  # 確定性:每個 mesh 固定 seed
+        os.makedirs(os.path.dirname(out), exist_ok=True)
         cache = preprocessor.build_cache(p)
         torch.save(cache, out)
 
@@ -62,7 +65,8 @@ def main(cfg: DictConfig) -> None:
         if key in seen:
             continue
         seen.add(key)
-        _build_split(preprocessor, ds.obj_root, cache_dir, force)
+        pattern = ds.get("pattern", "*.obj")  # 與 ObjMeshDataset 同一來源(data config)
+        _build_split(preprocessor, ds.obj_root, cache_dir, force, pattern)
 
     print("[build_cache] 完成")
 

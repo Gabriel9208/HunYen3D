@@ -15,5 +15,5 @@ multirun/
 checkpoints/
 ./wandb/
 ref/
-data/
-cache/
+/data/
+/cache/
