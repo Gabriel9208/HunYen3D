@@ -111,23 +111,8 @@ class Mesh2Query(nn.Module):
     `Preprocessor` 會組合這些 primitive 成 build_cache(heavy)/sample(light)。
     """
 
-    def __init__(
-        self,
-        random_sample_count: int,
-        important_sample_count: int,
-        down_sample_count: int,
-        num_surface_samples: int = 249856,
-        n_query_surface: int = 200_000,
-        n_query_uniform: int = 50_000,
-    ):
+    def __init__(self):
         super().__init__()
-
-        self.random_sample_count = random_sample_count
-        self.important_sample_count = important_sample_count
-        self.down_sample_count = down_sample_count
-        self.num_surface_samples = num_surface_samples
-        self.n_query_surface = n_query_surface
-        self.n_query_uniform = n_query_uniform
 
     # From original Hunyuan2.1 code
     def normalize_mesh(self, mesh, scale=0.98):
@@ -281,6 +266,7 @@ class Preprocessor(nn.Module):
         pe_freqs: int = 6,
         in_channels: int = 6,          # 每個表面點通道數:xyz(3) + normal(3)
         include_input: bool = True,
+        include_pi: bool = True,       # Fourier 頻率是否乘上 π(官方 vae-v2-1 為 false)
         random_sample_count: int = 4096,
         important_sample_count: int = 2048,
         down_sample_count: int = 4096,
@@ -294,6 +280,7 @@ class Preprocessor(nn.Module):
         self.pe_freqs = pe_freqs
         self.in_channels = in_channels
         self.include_input = include_input
+        self.include_pi = include_pi
         self.random_sample_count = random_sample_count
         self.important_sample_count = important_sample_count
         self.down_sample_count = down_sample_count
@@ -302,19 +289,13 @@ class Preprocessor(nn.Module):
         self.n_query_uniform = n_query_uniform
         self.sdf_subset = sdf_subset
 
-        self.mesh2query = Mesh2Query(
-            random_sample_count=random_sample_count,
-            important_sample_count=important_sample_count,
-            down_sample_count=down_sample_count,
-            num_surface_samples=num_surface_samples,
-            n_query_surface=n_query_surface,
-            n_query_uniform=n_query_uniform,
-        )
+        self.mesh2query = Mesh2Query()
         # 只對 xyz(3 維)做 Fourier;法向量不過 Fourier。
         self.fourier_embedder = FourierEmbedder(
             num_freqs=pe_freqs,
             input_dim=3,
             include_input=include_input,
+            include_pi=include_pi,
         )
 
     # ---- 維度(供對照 model 的 pe_dim;configs 的 encoder/decoder_pe_dim 需與此一致)----
@@ -350,12 +331,12 @@ class Preprocessor(nn.Module):
         important_pc, important_normal = self.mesh2query.important_sample(mesh, self.num_surface_samples)
 
         return {
-            "surface_pool": torch.cat([random_pc, random_normal], dim=1),     # (N, 6)
-            "sharp_pool": torch.cat([important_pc, important_normal], dim=1),  # (N, 6)
+            "surface_pool": torch.cat([random_pc, random_normal, torch.zeros(random_pc.shape[0], 1)], dim=1),     # (N, 7)
+            "sharp_pool": torch.cat([important_pc, important_normal, torch.ones(important_pc.shape[0], 1)], dim=1),  # (N, 7)
             "sdf_query_points": query_points,   # (Q, 3)
             "gt_sdf": gt_sdf,                   # (Q, 1)
             "signature": self.cache_signature,
-        }
+        } 
 
     # ---- light:每個 epoch ----
     def sample(self, cache: dict):
@@ -364,8 +345,8 @@ class Preprocessor(nn.Module):
         surf_fps = self.mesh2query.fps(surf, self.random_sample_count)
         sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
 
-        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important, 6)
-        data = torch.cat([surf, sharp], dim=0)            # (2 * down_sample_count, 6)
+        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important, 7)
+        data = torch.cat([surf, sharp], dim=0)            # (2 * down_sample_count, 7)
 
         qp = cache["sdf_query_points"]
         gt = cache["gt_sdf"]
