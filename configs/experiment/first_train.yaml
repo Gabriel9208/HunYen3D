@@ -13,7 +13,8 @@ task:
 
 trainer:
   val_interval: 1   
-  amp: true              
+  amp: true        
+  grad_accum_steps: 8      
 
 data:                    # obj_root/cache_dir/mode 由 data/shape_vae.yaml 提供;這裡只凍結取樣
   train:

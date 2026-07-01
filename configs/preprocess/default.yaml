@@ -14,5 +14,5 @@ num_surface_samples: 81920 # dense surface samples before downsampling
 n_query_surface: 200000     # SDF bank:近表面取樣數(離線一次,可大)
 n_query_uniform: 50000      # SDF bank:整個體積均勻取樣數(離線一次,可大)
 sdf_sample_point_count: 2000000  # mesh_to_sdf 表面取樣點數;預設 1e7→慢,2e6 速度約 3x 且GT精度幾乎不變(MAE  0.0001)
-sdf_subset: null            # 每個 step 從 SDF bank 抽幾個點來監督;null=全用。
+sdf_subset: 16384           # 每個 step 從 SDF bank 抽幾個點來監督;null=全用(250k 會 OOM,decoder cross-attn 激活過大)。
                             # 訓練用大 bank 時建議設(如 8192)以省 decoder 記憶體並提供每-epoch 變化

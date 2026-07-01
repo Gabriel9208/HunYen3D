@@ -2,7 +2,7 @@
 # 預設 mode=light:讀 cache_dir 下由 scripts/build_cache.py 產生的快取(訓練前先跑一次)。
 # 想即時跑(無快取/debug)改 mode=heavy。
 batch_size: 1
-num_workers: 0
+num_workers: 8
 
 train:
   dataset:
