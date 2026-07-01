@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
 
 import torch
 import torch.nn.functional as F
@@ -22,33 +21,9 @@ class StepOutput:
     metrics: dict[str, float] = field(default_factory=dict)
 
 
-@runtime_checkable
-class Task(Protocol):
-    """Decouples the training loop from model specifics.
-
-    A future VAETask would run encode/decode and return recon + KL here,
-    without the Trainer needing any changes.
-    """
-
-    def step(self, model: nn.Module, batch) -> StepOutput: ...
-
-
 class BaseTask(ABC):
     @abstractmethod
     def step(self, model: nn.Module, batch) -> StepOutput: ...
-
-
-class DummyTask(BaseTask):
-    """Trivial regression task so the scaffold runs end-to-end without real data."""
-
-    def __init__(self) -> None:
-        self.criterion = nn.MSELoss()
-
-    def step(self, model: nn.Module, batch) -> StepOutput:
-        x, y = batch["input"], batch["target"]
-        pred = model(x)
-        loss = self.criterion(pred, y)
-        return StepOutput(loss=loss, metrics={"mse": loss.item()})
 
 
 class VAETask(BaseTask):

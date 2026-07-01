@@ -4,23 +4,15 @@ from pathlib import Path
 
 import torch
 
-from src.engine.utils import is_main_process
-
 
 class CheckpointManager:
-    """Saves `last.pt` every checkpoint and `best.pt` when a new best metric is hit.
-
-    Only the main process writes (seam for future DDP).
-    """
+    """Saves `last.pt` every checkpoint and `best.pt` when a new best metric is hit."""
 
     def __init__(self, ckpt_dir: str):
         self.ckpt_dir = Path(ckpt_dir)
-        if is_main_process():
-            self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+        self.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    def save(self, state: dict, is_best: bool = False) -> Path | None:
-        if not is_main_process():
-            return None
+    def save(self, state: dict, is_best: bool = False) -> Path:
         last_path = self.ckpt_dir / "last.pt"
         torch.save(state, last_path)
         if is_best:

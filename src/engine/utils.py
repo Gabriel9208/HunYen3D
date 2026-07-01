@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import os
 import random
 
 import numpy as np
 import torch
+
+
+def cache_rel_path(mesh_rel: str) -> str:
+    """mesh 相對路徑 → 對應 .pt 相對路徑;剝掉 .gz 與 mesh 副檔名,讓 x.off / x.off.gz 都對到 x.pt。
+    build_cache.py / data.py / compress_cached_meshes.py 三處共用,避免命名漂移。"""
+    if mesh_rel.endswith(".gz"):
+        mesh_rel = mesh_rel[:-3]
+    return os.path.splitext(mesh_rel)[0] + ".pt"
 
 
 def set_seed(seed: int) -> None:
@@ -31,8 +40,3 @@ def move_to_device(batch, device: torch.device):
     if isinstance(batch, (list, tuple)):
         return type(batch)(move_to_device(v, device) for v in batch)
     return batch
-
-
-def is_main_process() -> bool:
-    """Single-process for now. Seam for future DDP (return rank == 0)."""
-    return True

@@ -4,8 +4,6 @@ from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
-from src.engine.utils import is_main_process
-
 
 class WandbLogger:
     """Thin wrapper around Weights & Biases.
@@ -18,7 +16,7 @@ class WandbLogger:
     def __init__(self, cfg: DictConfig, full_cfg: DictConfig | None = None):
         self.cfg = cfg
         self.full_cfg = full_cfg
-        self.enabled = is_main_process() and cfg.get("mode", "disabled") != "disabled"
+        self.enabled = cfg.get("mode", "disabled") != "disabled"
         self._run = None
 
     def init(self) -> None:

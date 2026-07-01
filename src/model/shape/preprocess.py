@@ -1,3 +1,4 @@
+import gzip
 import os
 
 import numpy as np
@@ -223,7 +224,8 @@ class Mesh2Query(nn.Module):
         n_uniform: int = 50_000,
         sigma1: float = 0.01,
         sigma2: float = 0.05,
-        ratio: float = 0.5
+        ratio: float = 0.5,
+        sample_point_count: int = 2_000_000,  # mesh_to_sdf 撒在表面的點數(越大越精、越慢)
     ):
         n_s1 = int(n_surface * ratio)
         n_s2 = n_surface - n_s1
@@ -242,6 +244,7 @@ class Mesh2Query(nn.Module):
             mesh, query_points,
             surface_point_method='sample',  # 純 trimesh 取樣,不需 OpenGL(headless 可用)
             sign_method='normal',
+            sample_point_count=sample_point_count,
         ).astype(np.float32)
 
         return torch.from_numpy(query_points), torch.from_numpy(gt_sdf).unsqueeze(-1)
@@ -273,6 +276,7 @@ class Preprocessor(nn.Module):
         num_surface_samples: int = 249856,
         n_query_surface: int = 200_000,
         n_query_uniform: int = 50_000,
+        sdf_sample_point_count: int = 2_000_000,  # mesh_to_sdf 表面取樣點數(heavy,影響精度與速度)
         sdf_subset: int | None = None,  # 每次 sample 監督的 SDF 點數(None = 用整個 bank)
     ):
         super().__init__()
@@ -287,6 +291,7 @@ class Preprocessor(nn.Module):
         self.num_surface_samples = num_surface_samples
         self.n_query_surface = n_query_surface
         self.n_query_uniform = n_query_uniform
+        self.sdf_sample_point_count = sdf_sample_point_count
         self.sdf_subset = sdf_subset
 
         self.mesh2query = Mesh2Query()
@@ -315,17 +320,24 @@ class Preprocessor(nn.Module):
             "num_surface_samples": self.num_surface_samples,
             "n_query_surface": self.n_query_surface,
             "n_query_uniform": self.n_query_uniform,
+            "sdf_sample_point_count": self.sdf_sample_point_count,
         }
 
     # ---- heavy:離線一次 ----
     def build_cache(self, mesh_path: str) -> dict:
         if not os.path.exists(mesh_path):
             raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
-        mesh = trimesh.load_mesh(mesh_path, force="mesh")
+        if mesh_path.endswith(".gz"):
+            inner = os.path.splitext(mesh_path[:-3])[1].lstrip(".")  # e.g. "off"
+            with gzip.open(mesh_path, "rb") as f:
+                mesh = trimesh.load(f, file_type=inner, force="mesh")
+        else:
+            mesh = trimesh.load_mesh(mesh_path, force="mesh")
         mesh = self.mesh2query.normalize_mesh(mesh, 0.98)
 
         query_points, gt_sdf = self.mesh2query.sample_query_points(
-            mesh, self.n_query_surface, self.n_query_uniform
+            mesh, self.n_query_surface, self.n_query_uniform,
+            sample_point_count=self.sdf_sample_point_count,
         )
         random_pc, random_normal = self.mesh2query.random_sample(mesh, self.num_surface_samples)
         important_pc, important_normal = self.mesh2query.important_sample(mesh, self.num_surface_samples)

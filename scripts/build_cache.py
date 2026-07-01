@@ -27,7 +27,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from tqdm.auto import tqdm
 
-from src.engine.utils import set_seed
+from src.engine.utils import cache_rel_path, set_seed
 
 _PREPROCESSOR = None
 
@@ -46,8 +46,7 @@ def _build_tasks(obj_root: str, cache_dir: str, force: bool,
     tasks = []
     for idx, p in enumerate(paths):
         # 鏡像 obj_root 的相對路徑(換成 .pt),避免不同子目錄同名(如 ShapeNet hash 重名)互相覆蓋。
-        rel = os.path.relpath(p, obj_root)
-        out = os.path.join(cache_dir, os.path.splitext(rel)[0] + ".pt")
+        out = os.path.join(cache_dir, cache_rel_path(os.path.relpath(p, obj_root)))
         tasks.append((idx, p, out, force))
     return tasks
 

@@ -14,13 +14,6 @@ class CrossAttentionEncoder(nn.Module):
     ):
         super().__init__()
 
-        self.num_latents = num_latents
-        self.pe_dim = pe_dim
-        self.latent_dim = latent_dim
-        self.width = width
-        self.num_head = num_head
-        self.num_layers = num_layers
-
         self.proj = nn.Linear(pe_dim, width) # position emb to transformer width
     
         self.cross_attention = ResidualMultiHeadCrossAttention(

@@ -9,7 +9,7 @@ train:
     _target_: src.engine.data.ObjMeshDataset
     obj_root: ${hydra:runtime.cwd}/data/train
     preprocessor: ${preprocess}
-    pattern: "*.off"
+    pattern: "*.off.gz"
     mode: light
     cache_dir: ${hydra:runtime.cwd}/cache
 
@@ -18,6 +18,6 @@ val:
     _target_: src.engine.data.ObjMeshDataset
     obj_root: ${hydra:runtime.cwd}/data/val
     preprocessor: ${preprocess}
-    pattern: "*.off"
+    pattern: "*.off.gz"
     mode: light
     cache_dir: ${hydra:runtime.cwd}/cache

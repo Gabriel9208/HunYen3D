@@ -3,16 +3,15 @@ from __future__ import annotations
 import logging
 
 import torch
+from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from src.engine.builder import (
     build_dataloaders,
-    build_model,
     build_optimizer,
     build_scheduler,
-    build_task,
 )
 from src.engine.checkpoint import CheckpointManager
 from src.engine.logging import WandbLogger
@@ -58,8 +57,6 @@ class Trainer:
         self.device = device
 
         self.amp = bool(cfg.amp) and device.type == "cuda"
-        # autocast 用 bf16(見下方);bf16 指數範圍同 fp32,不需要 loss scaling,故 GradScaler 永遠關閉。
-        self.scaler = torch.amp.GradScaler(device.type, enabled=False)
         self.grad_accum = max(1, int(cfg.grad_accum_steps))
         self.grad_clip = cfg.grad_clip
         self.max_epochs = int(cfg.max_epochs)
@@ -115,16 +112,14 @@ class Trainer:
             with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=self.amp):
                 out = self.task.step(self.model, batch)
                 loss = out.loss / self.grad_accum
-            self.scaler.scale(loss).backward()
+            loss.backward()
 
             if (i + 1) % self.grad_accum != 0:
                 continue
 
             if self.grad_clip:
-                self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+            self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
             if self.scheduler is not None:
                 self.scheduler.step()
@@ -177,15 +172,13 @@ class Trainer:
             "model": self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
-            "scaler": self.scaler.state_dict(),
             "epoch": self.epoch + 1,  # resume starts on the next epoch
             "global_step": self.global_step,
             "best_metric": self.best_metric,
             "cfg": OmegaConf.to_container(self.cfg, resolve=True),
         }
         path = self.ckpt.save(state, is_best=is_best)
-        if path is not None:
-            log.info("saved checkpoint -> %s", path)
+        log.info("saved checkpoint -> %s", path)
 
     def _resume(self, path: str) -> None:
         ckpt = CheckpointManager.load(path, map_location=self.device)
@@ -193,8 +186,6 @@ class Trainer:
         self.optimizer.load_state_dict(ckpt["optimizer"])
         if self.scheduler is not None and ckpt.get("scheduler") is not None:
             self.scheduler.load_state_dict(ckpt["scheduler"])
-        if ckpt.get("scaler"):  # empty when saved from a disabled (no-AMP) scaler
-            self.scaler.load_state_dict(ckpt["scaler"])
         self.epoch = ckpt.get("epoch", 0)
         self.global_step = ckpt.get("global_step", 0)
         self.best_metric = ckpt.get("best_metric", float("inf"))
@@ -207,8 +198,8 @@ def run(cfg: DictConfig) -> None:
     device = get_device(tcfg.get("device", "auto"))
     log.info("device: %s", device)
 
-    model = build_model(cfg.model).to(device)
-    task = build_task(cfg.task)
+    model = instantiate(cfg.model).to(device)
+    task = instantiate(cfg.task)
     optimizer = build_optimizer(cfg.optimizer, model.parameters())
 
     # 先建 dataloader 才知道 len(train_loader);scheduler 的 T_max 用「總 optimizer step 數」自動算。

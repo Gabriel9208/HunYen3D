@@ -1,10 +1,6 @@
 from torch import nn
 import torch.nn.functional as F
 
-class ScaledDotProductAttention():
-    def __call__(self, query, key, value):
-        return F.scaled_dot_product_attention(query, key, value)
-
 """
 Drop path (Stochastic Depth) code from Hunyuan3D 2.1 (And it is also in timm)
 """
@@ -70,13 +66,11 @@ class MultiHeadSelfAttention(nn.Module):
 
         self.width = width
         self.num_head = num_head
-        self.head_dim = width // num_head
         self.num_latents = num_latents
 
         self.qkv_proj = nn.Linear(width, width * 3)
         self.q_norm = nn.LayerNorm(width // num_head, eps=1e-6)
         self.k_norm = nn.LayerNorm(width // num_head, eps=1e-6)
-        self.attention = ScaledDotProductAttention()
         self.proj = nn.Linear(width, width)
 
     def forward(self, x):
@@ -94,7 +88,7 @@ class MultiHeadSelfAttention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        attn = self.attention(q, k, v)
+        attn = F.scaled_dot_product_attention(q, k, v)
         attn = attn.transpose(1, 2).contiguous().view(batch, self.num_latents, width)
         attn = self.proj(attn)
 
@@ -119,7 +113,6 @@ class MultiHeadCrossAttention(nn.Module):
         self.kv_proj = nn.Linear(data_dim, width * 2)
         self.q_norm = nn.LayerNorm(width // num_head, eps=1e-6)
         self.k_norm = nn.LayerNorm(width // num_head, eps=1e-6)
-        self.attention = ScaledDotProductAttention()
         self.proj = nn.Linear(width, width)
 
     def forward(self, query, data):
@@ -142,7 +135,7 @@ class MultiHeadCrossAttention(nn.Module):
         k = k.view(batch, data_len, self.num_head, self.head_dim).transpose(1, 2)
         v = v.view(batch, data_len, self.num_head, self.head_dim).transpose(1, 2)
 
-        attn = self.attention(q, k, v)
+        attn = F.scaled_dot_product_attention(q, k, v)
         attn = attn.transpose(1, 2).contiguous().view(batch, q_len, width)
         attn = self.proj(attn)
 

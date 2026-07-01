@@ -6,23 +6,7 @@ import os
 import torch
 from torch.utils.data import Dataset
 
-from src.engine.utils import set_seed
-
-class DummyShapeDataset(Dataset):
-    """Random tensors with a learnable target, so the scaffold's loss can actually
-    decrease. Replace with the real shape/SDF dataset later."""
-
-    def __init__(self, num_samples: int = 256, dim: int = 16, seed: int = 0):
-        g = torch.Generator().manual_seed(seed)
-        self.inputs = torch.randn(num_samples, dim, generator=g)
-        self.targets = torch.tanh(self.inputs) * 2.0
-
-    def __len__(self) -> int:
-        return self.inputs.shape[0]
-
-    def __getitem__(self, idx: int):
-        return {"input": self.inputs[idx], "target": self.targets[idx]}
-
+from src.engine.utils import cache_rel_path, set_seed
 
 class ObjMeshDataset(Dataset):
     """把 .obj mesh 經由 `Preprocessor` 變成 VAE 的輸入。負責 IO + 模式 + 可重現,
@@ -64,25 +48,25 @@ class ObjMeshDataset(Dataset):
 
     def _cache_path(self, mesh_path: str) -> str:
         # 與 scripts/build_cache.py 一致:鏡像 obj_root 的相對路徑,避免同名 mesh 對到同一份快取。
-        rel = os.path.relpath(mesh_path, self.obj_root)
-        return os.path.join(self.cache_dir, os.path.splitext(rel)[0] + ".pt")
+        return os.path.join(self.cache_dir, cache_rel_path(os.path.relpath(mesh_path, self.obj_root)))
 
     def __getitem__(self, idx: int):
         if self.fixed_seed is not None:
             set_seed(self.fixed_seed + idx)
 
+        path = self.paths[idx]
         if self.mode == "light":
-            cpath = self._cache_path(self.paths[idx])
-            if not os.path.exists(cpath):
-                raise FileNotFoundError(
-                    f"找不到快取 {cpath};請先跑 `scripts/build_cache.py` 建立快取"
-                    f"(或改用 mode=heavy)。"
-                )
-            cache = torch.load(cpath, weights_only=False)
-            self._check_signature(cache, cpath)
+            cpath = self._cache_path(path)
+            if os.path.exists(cpath):
+                cache = torch.load(cpath, weights_only=False)
+                self._check_signature(cache, cpath)
+            else:  # cache 掉了 → 用 mesh 跑 heavy 補回快取,下次自動切回 light
+                cache = self.preprocessor.build_cache(path)
+                os.makedirs(os.path.dirname(cpath), exist_ok=True)
+                torch.save(cache, cpath)
             q, d, query_points, gt_sdf = self.preprocessor.sample(cache)
-        else:  # heavy
-            q, d, query_points, gt_sdf = self.preprocessor(self.paths[idx])
+        else:  # heavy 模式(debug):即時跑,不存快取
+            q, d, query_points, gt_sdf = self.preprocessor(path)
 
         return {
             "query": q,                    # (L_q, encoder_pe_dim)

@@ -14,14 +14,7 @@ class CrossAttentionDecoder(nn.Module):
     ):
         super().__init__()
 
-        self.num_latents = num_latents
-        self.pe_dim = pe_dim
-        self.latent_dim = latent_dim
-        self.width = width
-        self.num_head = num_head
-        self.num_layers = num_layers
-
-        self.proj_pe = nn.Linear(pe_dim, width) 
+        self.proj_pe = nn.Linear(pe_dim, width)
         self.proj_latent = nn.Linear(latent_dim, width) 
          
         self.self_attention = nn.ModuleList(

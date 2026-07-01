@@ -9,14 +9,6 @@ and in one place. Optimizer/scheduler configs use `_partial_: true`, so
 instantiate returns a partial that we bind to params/optimizer here."""
 
 
-def build_model(cfg: DictConfig):
-    return instantiate(cfg)
-
-
-def build_task(cfg: DictConfig):
-    return instantiate(cfg)
-
-
 def build_optimizer(cfg: DictConfig, params):
     return instantiate(cfg)(params)
 
