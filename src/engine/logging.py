@@ -30,6 +30,8 @@ class WandbLogger:
             name=self.cfg.get("name"),
             tags=list(self.cfg.get("tags", []) or []),
             mode=self.cfg.get("mode", "online"),
+            id=self.cfg.get("id"),
+            resume=self.cfg.get("resume"),
             config=(
                 OmegaConf.to_container(self.full_cfg, resolve=True)
                 if self.full_cfg is not None

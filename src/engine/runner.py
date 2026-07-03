@@ -149,6 +149,7 @@ class Trainer:
     def validate(self) -> float:
         self.model.eval()
         total, n = 0.0, 0
+        sums: dict[str, float] = {}
         val_bar = tqdm(
             self.val_loader,
             desc="val",
@@ -162,8 +163,12 @@ class Trainer:
                 out = self.task.step(self.model, batch)
             total += out.loss.item()
             n += 1
+            for k, v in out.metrics.items():
+                sums[k] = sums.get(k, 0.0) + v
         avg = total / max(n, 1)
-        self.logger.log({"val/loss": avg, "epoch": self.epoch}, step=self.global_step)
+        metrics = {"val/loss": avg, "epoch": self.epoch}
+        metrics.update({f"val/{k}": v / max(n, 1) for k, v in sums.items()})
+        self.logger.log(metrics, step=self.global_step)
         log.info("[val] epoch %d loss %.4f", self.epoch, avg)
         return avg
 

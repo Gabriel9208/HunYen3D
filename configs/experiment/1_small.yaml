@@ -1,0 +1,48 @@
+# @package _global_
+# 縮小版:層數砍半、latent 砍半,用來快速跑對照實驗(非 SOTA)。
+# num_latents 綁 encoder query 長度 = random_sample_count + important_sample_count,
+# 所以砍 latent 必須連動砍這兩個(都是 light 參數,不在 cache_signature → 不會讓既有快取失效)。
+# width / latent_dim / pe_freqs 不動,只砍深度與 latent 數。
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /data: shape_vae
+
+model:
+  num_latents: 2048          # 4096 -> 2048
+  num_encoder_layers: 4      # 8 -> 4
+  num_decoder_layers: 8      # 16 -> 8
+
+preprocess:
+  random_sample_count: 1024      # 2048 -> 1024(隨 num_latents 連動)
+  important_sample_count: 1024   # 2048 -> 1024(隨 num_latents 連動)
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+
+trainer:
+  val_interval: 1
+  amp: true
+  grad_accum_steps: 8
+  resume: /home/gabriel/dev/HunYen3D/outputs/2026-07-02/19-06-50/checkpoints/last.pt
+data:
+  batch_size: 4
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: null
+  tags: []
+  mode: online 
+  id: sv047kzw
+  resume: allow

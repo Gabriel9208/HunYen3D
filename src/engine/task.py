@@ -38,8 +38,9 @@ class VAETask(BaseTask):
     `recon + r * KL` and is config-driven.
     """
 
-    def __init__(self, kl_weight: float = 1.0e-3) -> None:
+    def __init__(self, kl_weight: float = 1.0e-3, clamp_val=0.1) -> None:
         self.kl_weight = kl_weight
+        self.clamp_val = clamp_val
 
     def step(self, model: nn.Module, batch) -> StepOutput:
         z, kl = model.encode(batch["query"], batch["data"])
@@ -48,7 +49,13 @@ class VAETask(BaseTask):
 
     def compute_loss(self, model: nn.Module, batch, z, kl) -> StepOutput:
         pred_sdf = model.decode(z, batch["query_points"])
-        recon_loss = F.mse_loss(pred_sdf, batch["gt_sdf"])
+        gt = batch["gt_sdf"]
+
+        if self.clamp_val > 0.0:
+            pred_sdf = torch.clamp(pred_sdf, -self.clamp_val, self.clamp_val)
+            gt = torch.clamp(gt, -self.clamp_val, self.clamp_val)
+                    
+        recon_loss = F.mse_loss(pred_sdf, gt)
 
         loss = recon_loss + self.kl_weight * kl.mean()
         

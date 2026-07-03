@@ -8,6 +8,16 @@ learned*, including dead ends. Results are interpreted as evidence about methods
 leaderboard numbers (see the README's scope note: resources are limited and SOTA is not the
 goal).
 
+## Papers
+
+| Paper / Idea | Content |
+|------|--------------|
+| 3DShape2VecSet | VecSet representation | 
+| Dora | Sharp Edge Sampling |
+| Hunyuan3D-2 | A VAE-DiT 3D shape foundation model structure |
+| XCube | Sparse Voxel |
+| | |
+
 ## Experiments
 
 | Date | Paper / Idea | Hypothesis | Change | Dataset | Result / Observation | Next step |
