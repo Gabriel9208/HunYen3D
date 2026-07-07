@@ -1,6 +1,6 @@
-# obj meshes -> VAE encoder inputs。dataset 透過 ${preprocess} 取得共用的 Preprocessor。
-# 預設 mode=light:讀 cache_dir 下由 scripts/build_cache.py 產生的快取(訓練前先跑一次)。
-# 想即時跑(無快取/debug)改 mode=heavy。
+# obj meshes -> VAE encoder inputs. The dataset gets the shared Preprocessor via ${preprocess}.
+# Default mode=light: read the cache under cache_dir produced by scripts/build_cache.py (run once before training).
+# For on-the-fly runs (no cache / debug) switch to mode=heavy.
 batch_size: 1
 num_workers: 8
 

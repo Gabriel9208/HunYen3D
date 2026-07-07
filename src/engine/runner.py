@@ -207,7 +207,7 @@ def run(cfg: DictConfig) -> None:
     task = instantiate(cfg.task)
     optimizer = build_optimizer(cfg.optimizer, model.parameters())
 
-    # 先建 dataloader 才知道 len(train_loader);scheduler 的 T_max 用「總 optimizer step 數」自動算。
+    # Build the dataloader first so len(train_loader) is known; the scheduler's T_max is auto-computed from the total optimizer-step count.
     train_loader, val_loader = build_dataloaders(cfg.data)
     steps_per_epoch = len(train_loader) // max(1, int(tcfg.grad_accum_steps))
     total_steps = steps_per_epoch * int(tcfg.max_epochs)

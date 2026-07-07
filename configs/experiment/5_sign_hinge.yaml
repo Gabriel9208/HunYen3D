@@ -1,6 +1,6 @@
 # @package _global_
-# 符號解耦(hinge 版):加權 MSE + α·relu(margin − pred·sign(gt))。用基本數學罰符號,
-# 取代會吹爆 pred 的 BCE(見 4_sign_aware 的失敗)。掃 α 用 task.recon_loss.sign_weight。
+# Sign decoupling (hinge version): weighted MSE + α·relu(margin − pred·sign(gt)). Penalizes the sign
+# with basic math, replacing BCE which blows pred up (see 4_sign_aware's failure). Sweep α via task.recon_loss.sign_weight.
 defaults:
   - override /model: shape_vae
   - override /task: vae

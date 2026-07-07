@@ -1,15 +1,16 @@
-"""把已經有效快取的原始 mesh 就地壓縮(.off -> .off.gz),回收硬碟空間。
+"""Compress in place the original meshes that are already validly cached (.off -> .off.gz), to reclaim disk.
 
-一旦某個 mesh 的 cache_dir/<相對路徑>.pt 已存在且可載入,訓練時 mode="light"
-完全不會再讀取原始 mesh(見 src/engine/data.py ObjMeshDataset.__getitem__),
-所以已快取的原始 .off 可以安全壓縮保存(可逆,非刪除)。
+Once a mesh's cache_dir/<rel path>.pt exists and loads, training's mode="light" never reads the
+original mesh again (see src/engine/data.py ObjMeshDataset.__getitem__), so cached originals can be
+safely compressed (reversible, not deleted).
 
-用法:
-  uv run python scripts/compress_cached_meshes.py +experiment=first_train dry_run=true  # 預覽
-  uv run python scripts/compress_cached_meshes.py +experiment=first_train               # 正式壓縮
+Usage:
+  uv run python scripts/compress_cached_meshes.py +experiment=first_train dry_run=true  # preview
+  uv run python scripts/compress_cached_meshes.py +experiment=first_train               # actually compress
 
-注意:壓縮後 build_cache.py 的 `*.off` glob 抓不到 `.off.gz`,若之後要用不同的
-heavy 參數 force=true 重建快取,已壓縮的項目會被靜默跳過,需要先手動 gunzip。
+Note: after compression, build_cache.py's `*.off` glob won't match `.off.gz`; if you later rebuild
+the cache with different heavy params (force=true), the compressed items are silently skipped and
+need a manual gunzip first.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import sys
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 
-# 讓 `scripts/` 底下執行也能 import 到 repo 根目錄的 `src`
+# So running under scripts/ can still import `src` from the repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import hydra
@@ -36,7 +37,7 @@ _REQUIRED_KEYS = {"surface_pool", "sharp_pool", "sdf_query_points", "gt_sdf", "s
 
 
 def _cache_path(mesh_path: str, obj_root: str, cache_dir: str) -> str:
-    # 與 scripts/build_cache.py、src/engine/data.py 一致:鏡像 obj_root 的相對路徑。
+    # Same as scripts/build_cache.py and src/engine/data.py: mirror obj_root's relative path.
     return os.path.join(cache_dir, cache_rel_path(os.path.relpath(mesh_path, obj_root)))
 
 
@@ -92,15 +93,15 @@ def _worker(task: tuple) -> dict:
 
 
 def _print_summary(counts: Counter, total_orig: int, total_comp: int) -> None:
-    print("[compress_cached_meshes] 結果統計:")
+    print("[compress_cached_meshes] summary:")
     for status, n in counts.items():
         print(f"  {status}: {n}")
     gb = 1024 ** 3
-    print(f"[compress_cached_meshes] 原始大小: {total_orig / gb:.2f} G, "
-          f"壓縮後: {total_comp / gb:.2f} G, 回收: {(total_orig - total_comp) / gb:.2f} G")
-    print("[compress_cached_meshes] 警告:已壓縮的 mesh 若之後要用不同 heavy 參數 "
-          "force=true 重建快取,build_cache.py 的 `*.off` glob 抓不到 `.off.gz`,"
-          "會被靜默跳過,需要的話請先手動 gunzip 該檔案。")
+    print(f"[compress_cached_meshes] original size: {total_orig / gb:.2f} G, "
+          f"compressed: {total_comp / gb:.2f} G, reclaimed: {(total_orig - total_comp) / gb:.2f} G")
+    print("[compress_cached_meshes] warning: if you later rebuild the cache for a compressed mesh with "
+          "different heavy params (force=true), build_cache.py's `*.off` glob won't match `.off.gz` "
+          "and it is silently skipped; manually gunzip the file first if needed.")
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -116,7 +117,7 @@ def main(cfg: DictConfig) -> None:
         ds = cfg.data[split].dataset
         cache_dir = ds.get("cache_dir")
         if cache_dir is None:
-            raise ValueError(f"data.{split}.dataset.cache_dir 未設定")
+            raise ValueError(f"data.{split}.dataset.cache_dir is not set")
         key = f"{ds.obj_root}->{cache_dir}"
         if key in seen:
             continue
@@ -124,7 +125,7 @@ def main(cfg: DictConfig) -> None:
 
         pattern = ds.get("pattern", "*.obj")
         tasks = _build_tasks(ds.obj_root, cache_dir, pattern)
-        print(f"[compress_cached_meshes] {split}: {len(tasks)} 個 mesh 候選")
+        print(f"[compress_cached_meshes] {split}: {len(tasks)} candidate meshes")
 
         if dry_run:
             for mesh_path, cache_path in tqdm(tasks):

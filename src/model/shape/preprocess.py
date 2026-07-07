@@ -107,9 +107,10 @@ class FourierEmbedder(nn.Module):
 
 
 class Mesh2Query(nn.Module):
-    """Mesh 取樣的 primitives(heavy 端的零件)。負責把一個 mesh 變成原始幾何取樣:
-    表面點雲 + 法向量、近表面/均勻 SDF 監督點。不做 Fourier、不負責 IO。
-    `Preprocessor` 會組合這些 primitive 成 build_cache(heavy)/sample(light)。
+    """Mesh sampling primitives (the heavy-side parts). Turns a mesh into raw geometry
+    samples: surface point cloud + normals, near-surface / uniform SDF supervision points.
+    Does no Fourier and no IO. `Preprocessor` composes these primitives into
+    build_cache (heavy) / sample (light).
     """
 
     def __init__(self):
@@ -225,7 +226,7 @@ class Mesh2Query(nn.Module):
         sigma1: float = 0.01,
         sigma2: float = 0.05,
         ratio: float = 0.5,
-        sample_point_count: int = 2_000_000,  # mesh_to_sdf 撒在表面的點數(越大越精、越慢)
+        sample_point_count: int = 2_000_000,  # points mesh_to_sdf scatters on the surface (larger = more accurate, slower)
     ):
         n_s1 = int(n_surface * ratio)
         n_s2 = n_surface - n_s1
@@ -242,7 +243,7 @@ class Mesh2Query(nn.Module):
 
         gt_sdf = mesh_to_sdf(
             mesh, query_points,
-            surface_point_method='sample',  # 純 trimesh 取樣,不需 OpenGL(headless 可用)
+            surface_point_method='sample',  # pure trimesh sampling, no OpenGL needed (works headless)
             sign_method='normal',
             sample_point_count=sample_point_count,
         ).astype(np.float32)
@@ -251,15 +252,16 @@ class Mesh2Query(nn.Module):
 
 
 class Preprocessor(nn.Module):
-    """mesh -> 模型輸入 tensor 的「單一真相」,支援 heavy / light 兩條路:
+    """The single source of truth for mesh -> model-input tensors, supporting heavy / light paths:
 
-    - build_cache(mesh_path): heavy。產出「大池」(surface/sharp 點雲含法向量)與 SDF bank
-      (query_points + gt_sdf),都是 pre-fourier 的原始幾何。離線跑一次、存檔。
-    - sample(cache): light。從大池子採樣 + downsample/FPS、從 SDF bank 抽子集,最後做 Fourier。
-      每個 epoch 呼叫,便宜(~1s),且保留子採樣隨機性。
-    - forward(mesh_path) = sample(build_cache(...)): heavy 模式(即時、慢;debug 或無快取時的後備)。
+    - build_cache(mesh_path): heavy. Produces the "big pool" (surface/sharp point clouds with
+      normals) and the SDF bank (query_points + gt_sdf), all pre-Fourier raw geometry. Run once
+      offline and saved.
+    - sample(cache): light. Subsamples from the big pool + downsample/FPS, draws a subset from the
+      SDF bank, then applies Fourier. Called every epoch, cheap (~1s), and keeps the subsampling randomness.
+    - forward(mesh_path) = sample(build_cache(...)): heavy mode (on the fly, slow; a fallback for debug or no cache).
 
-    Fourier 只作用在 xyz(3 維),法向量原樣 concat:
+    Fourier only acts on xyz (3 dims); normals are concatenated as-is:
       encoder pe_dim = self.encoder_pe_dim = fourier(3) + (in_channels - 3)
       decoder pe_dim = self.decoder_pe_dim = fourier(3)
     """
@@ -267,17 +269,17 @@ class Preprocessor(nn.Module):
     def __init__(
         self,
         pe_freqs: int = 6,
-        in_channels: int = 6,          # 每個表面點通道數:xyz(3) + normal(3)
+        in_channels: int = 6,          # channels per surface point: xyz(3) + normal(3)
         include_input: bool = True,
-        include_pi: bool = True,       # Fourier 頻率是否乘上 π(官方 vae-v2-1 為 false)
+        include_pi: bool = True,       # whether Fourier frequencies are multiplied by π (official vae-v2-1 uses false)
         random_sample_count: int = 4096,
         important_sample_count: int = 2048,
         down_sample_count: int = 4096,
         num_surface_samples: int = 249856,
         n_query_surface: int = 200_000,
         n_query_uniform: int = 50_000,
-        sdf_sample_point_count: int = 2_000_000,  # mesh_to_sdf 表面取樣點數(heavy,影響精度與速度)
-        sdf_subset: int | None = None,  # 每次 sample 監督的 SDF 點數(None = 用整個 bank)
+        sdf_sample_point_count: int = 2_000_000,  # mesh_to_sdf surface sample count (heavy; affects accuracy and speed)
+        sdf_subset: int | None = None,  # SDF points supervised per sample (None = use the whole bank)
     ):
         super().__init__()
 
@@ -295,7 +297,7 @@ class Preprocessor(nn.Module):
         self.sdf_subset = sdf_subset
 
         self.mesh2query = Mesh2Query()
-        # 只對 xyz(3 維)做 Fourier;法向量不過 Fourier。
+        # Fourier only on xyz (3 dims); normals do not go through Fourier.
         self.fourier_embedder = FourierEmbedder(
             num_freqs=pe_freqs,
             input_dim=3,
@@ -303,19 +305,19 @@ class Preprocessor(nn.Module):
             include_pi=include_pi,
         )
 
-    # ---- 維度(供對照 model 的 pe_dim;configs 的 encoder/decoder_pe_dim 需與此一致)----
+    # ---- dims (to match the model's pe_dim; configs' encoder/decoder_pe_dim must agree with these) ----
     @property
-    def decoder_pe_dim(self) -> int:        # SDF 查詢點:只有 xyz 過 Fourier
+    def decoder_pe_dim(self) -> int:        # SDF query points: only xyz goes through Fourier
         return self.fourier_embedder.out_dim
 
     @property
-    def encoder_pe_dim(self) -> int:        # 表面點:Fourier(xyz) + 法向量
+    def encoder_pe_dim(self) -> int:        # surface points: Fourier(xyz) + normal
         return self.fourier_embedder.out_dim + (self.in_channels - 3)
 
     @property
     def cache_signature(self) -> dict:
-        # 只含影響「大池 / SDF bank」內容的 heavy 參數;light 參數(down/random/important/pe/sdf_subset)
-        # 改變不需要重建快取。
+        # Only the heavy params that affect the big pool / SDF bank contents; changing light params
+        # (down/random/important/pe/sdf_subset) does not require rebuilding the cache.
         return {
             "num_surface_samples": self.num_surface_samples,
             "n_query_surface": self.n_query_surface,
@@ -323,7 +325,7 @@ class Preprocessor(nn.Module):
             "sdf_sample_point_count": self.sdf_sample_point_count,
         }
 
-    # ---- heavy:離線一次 ----
+    # ---- heavy: offline once ----
     def build_cache(self, mesh_path: str) -> dict:
         if not os.path.exists(mesh_path):
             raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
@@ -350,7 +352,7 @@ class Preprocessor(nn.Module):
             "signature": self.cache_signature,
         } 
 
-    # ---- light:每個 epoch ----
+    # ---- light: every epoch ----
     def sample(self, cache: dict):
         surf = self.mesh2query.downsample(cache["surface_pool"], self.down_sample_count)
         sharp = self.mesh2query.downsample(cache["sharp_pool"], self.down_sample_count)
@@ -368,14 +370,14 @@ class Preprocessor(nn.Module):
 
         q = self._embed_surface(query)
         d = self._embed_surface(data)
-        sdf_query_points = self.fourier_embedder(qp)   # 只有 xyz
+        sdf_query_points = self.fourier_embedder(qp)   # xyz only
         return q, d, sdf_query_points, gt
 
     def _embed_surface(self, pts: torch.Tensor) -> torch.Tensor:
-        # pts: (L, in_channels) = [xyz(3) | normal(in_channels-3)];Fourier 只作用 xyz。
+        # pts: (L, in_channels) = [xyz(3) | normal(in_channels-3)]; Fourier acts on xyz only.
         xyz, normal = pts.split([3, pts.shape[-1] - 3], dim=-1)
         return torch.cat([self.fourier_embedder(xyz), normal], dim=-1)
 
-    # ---- heavy 模式(即時)----
+    # ---- heavy mode (on the fly) ----
     def forward(self, mesh_path: str):
         return self.sample(self.build_cache(mesh_path))

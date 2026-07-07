@@ -1,6 +1,6 @@
-# _partial_: true -> instantiate 回傳 partial,在 builder 綁定 optimizer。
-# 每個 optimizer step 走一格。T_max 留成 ???:builder 會自動填成 len(train_loader) × max_epochs;
-# 想手動固定就在 CLI/experiment 覆寫 scheduler.T_max=<數值>。
+# _partial_: true -> instantiate returns a partial, bound to the optimizer in the builder.
+# Steps once per optimizer step. Leave T_max as ???: the builder auto-fills it to len(train_loader) × max_epochs;
+# to fix it manually, override scheduler.T_max=<value> in the CLI/experiment.
 _target_: torch.optim.lr_scheduler.CosineAnnealingLR
 _partial_: true
 T_max: ???

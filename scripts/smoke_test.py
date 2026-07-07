@@ -1,9 +1,9 @@
-"""Smoke test:跑幾個真實 train step,確認不 OOM、loss 有限,並印峰值顯存。
+"""Smoke test: run a few real train steps, confirm no OOM, finite loss, and print peak VRAM.
 
-打的是完整訓練路徑(encode → decode → backward → optimizer.step),用真實 cache 資料,
-所以能直接驗證 sdf_subset / bf16 這類記憶體設定是否進得去。
+Exercises the full training path (encode → decode → backward → optimizer.step) on real cache
+data, so it directly verifies whether memory settings like sdf_subset / bf16 fit.
 
-用法:
+Usage:
   uv run python scripts/smoke_test.py +experiment=first_train
   uv run python scripts/smoke_test.py +experiment=first_train steps=5
 """
@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import sys
 
-# 讓 `scripts/` 底下執行也能 import 到 repo 根目錄的 `src`
+# So running under scripts/ can still import `src` from the repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import hydra
@@ -46,14 +46,14 @@ def main(cfg: DictConfig) -> None:
             out = task.step(model, batch)
         out.loss.backward()
         optimizer.step()
-        assert torch.isfinite(out.loss), f"step {i}: loss 非有限值 {out.loss}"
+        assert torch.isfinite(out.loss), f"step {i}: loss is not finite {out.loss}"
         print(f"step {i}: loss={out.loss.item():.4f} "
               f"recon={out.metrics['recon']:.4f} kl={out.metrics['kl']:.4f}")
 
     if device.type == "cuda":
         peak = torch.cuda.max_memory_allocated() / 1024 ** 3
         total = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
-        print(f"[smoke] OK — {steps} steps 無 OOM,峰值顯存 {peak:.2f} / {total:.2f} GiB")
+        print(f"[smoke] OK — {steps} steps no OOM, peak VRAM {peak:.2f} / {total:.2f} GiB")
 
 
 if __name__ == "__main__":

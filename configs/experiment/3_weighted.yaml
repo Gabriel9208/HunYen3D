@@ -1,7 +1,7 @@
 # @package _global_
-# 近表面加權 MSE(WeightedSDFLoss)from-scratch 小模型實驗。
-# loss 用預設 weighted group(configs/loss/weighted.yaml);調 λ/β 用
-#   task.recon_loss.near_weight / task.recon_loss.near_beta,設 near_beta=0 退化成 unweighted。
+# Near-surface weighted MSE (WeightedSDFLoss), from-scratch small model.
+# Uses the default weighted group (configs/loss/weighted.yaml); tune λ/β via
+#   task.recon_loss.near_weight / task.recon_loss.near_beta; near_beta=0 degenerates to unweighted.
 defaults:
   - override /model: shape_vae
   - override /task: vae

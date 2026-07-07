@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import torch
 
-# 按 |gt_sdf| 距離分帶(自製);far 上界取大值涵蓋全部
+# Bands by |gt_sdf| distance (custom); the far upper bound is large to cover everything.
 DEFAULT_BANDS = [(0.0, 0.02, "near |gt|<0.02"), (0.02, 0.1, "mid  0.02-0.1"), (0.1, 9.9, "far  >0.1")]
 
 
 class BandedSDFMetrics:
-    """自製診斷指標(非文獻標準,內部除錯用):
+    """Custom diagnostic metric (not a literature standard, for internal debugging):
 
-    整體 sign-acc + 按 |gt| 分帶(近/中/遠)的 sign-acc / MSE / pred0-pred1 基準。
-    針對「overall 平均會被遠場好猜的點灌高、藏住近表面其實是擲硬幣」而設計。
-    pred0 = 全吐 0 的 MSE、pred1 = 全吐 1 的 MSE:model MSE ≈ pred0 代表該帶等於沒學。
+    overall sign-acc + per-band (near/mid/far by |gt|) sign-acc / MSE / pred0-pred1
+    baselines. Designed because the overall average is inflated by easy far-field
+    points and hides that the near surface is a coin flip.
+    pred0 = MSE of predicting all 0, pred1 = MSE of predicting all 1: model MSE ≈
+    pred0 means that band learned nothing.
     """
 
     def __init__(self, bands=DEFAULT_BANDS) -> None:
@@ -28,20 +30,20 @@ class BandedSDFMetrics:
             out["bands"][name] = {
                 "frac": m.float().mean().item() * 100,
                 "mse": (pred[m] - gt[m]).pow(2).mean().item(),
-                "pred0": gt[m].pow(2).mean().item(),           # 全 predict 0
-                "pred1": (1.0 - gt[m]).pow(2).mean().item(),   # 全 predict 1
+                "pred0": gt[m].pow(2).mean().item(),           # predict all 0
+                "pred1": (1.0 - gt[m]).pow(2).mean().item(),   # predict all 1
                 "sign_acc": (pred[m].sign() == gt[m].sign()).float().mean().item() * 100,
             }
         return out
 
 
 if __name__ == "__main__":
-    # near 帶全對、far 帶全錯 → 各帶 sign-acc 應為 100 / 0
-    gt = torch.tensor([0.005, -0.01, 0.5, -0.5])       # 兩近、兩遠
-    pred = torch.tensor([0.005, -0.01, -0.5, 0.5])     # 近對、遠反號
+    # near band all correct, far band all wrong -> per-band sign-acc should be 100 / 0
+    gt = torch.tensor([0.005, -0.01, 0.5, -0.5])       # two near, two far
+    pred = torch.tensor([0.005, -0.01, -0.5, 0.5])     # near correct, far flipped
     r = BandedSDFMetrics()(pred, gt)
     assert abs(r["bands"]["near |gt|<0.02"]["sign_acc"] - 100.0) < 1e-6, r
     assert abs(r["bands"]["far  >0.1"]["sign_acc"] - 0.0) < 1e-6, r
     assert abs(r["bands"]["near |gt|<0.02"]["frac"] - 50.0) < 1e-6, r
-    assert abs(r["overall_sign_acc"] - 50.0) < 1e-6, r  # 2/4 對
+    assert abs(r["overall_sign_acc"] - 50.0) < 1e-6, r  # 2/4 correct
     print("OK: BandedSDFMetrics")

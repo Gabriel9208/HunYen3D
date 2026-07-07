@@ -1,7 +1,7 @@
 defaults:
   - model: shape_vae
   - task: vae
-  - loss@task.recon_loss: weighted   # 注入 task.recon_loss;實驗可 override 成 clamp
+  - loss@task.recon_loss: weighted   # inject task.recon_loss; experiments can override to clamp
   - data: shape_vae
   - optimizer: adamw
   - scheduler: cosine

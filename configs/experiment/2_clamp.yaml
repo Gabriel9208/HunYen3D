@@ -2,7 +2,7 @@
 defaults:
   - override /model: shape_vae
   - override /task: vae
-  - override /loss@task.recon_loss: clamp   # 換成 TSDF clamp loss
+  - override /loss@task.recon_loss: clamp   # switch to the TSDF clamp loss
   - override /data: shape_vae
 
 model:
@@ -21,7 +21,7 @@ optimizer:
 task:
   kl_weight: 1e-4
   recon_loss:
-    clamp_val: 0.1   # δ,可調
+    clamp_val: 0.1   # δ, tunable
 
 trainer:
   val_interval: 1

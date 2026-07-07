@@ -1,11 +1,12 @@
-"""幾何重建評估:回答「MSE 0.0x 到底是好是壞」。
+"""Geometric reconstruction eval: answers "is an MSE of 0.0x actually good or bad?".
 
-MSE 會被遠場好猜的點拉低而失真,所以這裡按 |gt_sdf| 距離分帶看 MSE,並算幾何上有意義的:
-  - sign accuracy(內/外判對比例)——尤其近表面那帶才是關鍵
-  - occupancy IoU(sdf<0 視為內部)
-用固定 mu(不取樣)在每個形狀自己的 query points 上重建。
+MSE is dragged down and distorted by easy far-field points, so here we look at MSE banded
+by |gt_sdf| distance, plus geometrically meaningful metrics:
+  - sign accuracy (fraction of inside/outside classified correctly) -- the near band is what matters
+  - occupancy IoU (sdf<0 treated as inside)
+Reconstructs with a fixed mu (no sampling) on each shape's own query points.
 
-用法:
+Usage:
   uv run python scripts/eval_recon.py +experiment=small \
       +ckpt=/abs/path/last.pt +shapes=16
 """
@@ -52,13 +53,13 @@ def main(cfg: DictConfig) -> None:
 
     print(f"\nshapes={n}  points={gt.numel():,}  ckpt={cfg.ckpt}")
     print(f"overall MSE      : {(pred - gt).pow(2).mean():.5f}")
-    print(f"overall RMS      : {(pred - gt).pow(2).mean().sqrt():.4f}  (SDF 尺度 ~[-1,1])")
-    print(f"sign accuracy    : {diag['overall_sign_acc']:.2f}%  (整體;遠場好猜會灌高)")
+    print(f"overall RMS      : {(pred - gt).pow(2).mean().sqrt():.4f}  (SDF scale ~[-1,1])")
+    print(f"sign accuracy    : {diag['overall_sign_acc']:.2f}%  (overall; easy far field inflates it)")
     print(f"occupancy IoU    : {iou * 100:.2f}%")
 
-    print("按距離分帶(pred0/pred1 = 全吐 0 / 全吐 1 的對照基準;model MSE ≈ pred0 = 該帶等於沒學):")
+    print("banded by distance (pred0/pred1 = predict-all-0 / predict-all-1 baselines; model MSE ≈ pred0 = that band learned nothing):")
     for name, b in diag["bands"].items():
-        print(f"  {name:<16} 佔比{b['frac']:5.1f}%  MSE={b['mse']:.5f}  "
+        print(f"  {name:<16} frac{b['frac']:5.1f}%  MSE={b['mse']:.5f}  "
               f"(pred0={b['pred0']:.5f} pred1={b['pred1']:.5f})  sign-acc={b['sign_acc']:5.1f}%")
 
 

@@ -1,33 +1,33 @@
 # @package _global_
-# 用法:uv run python main.py +experiment=overfit
-# 把單一 mesh overfit 需要的所有 override 收在這一個檔(取代散落在各 group 的 overfit 變體)。
+# Usage: uv run python main.py +experiment=overfit
+# Collects every override needed to overfit a single mesh in one file (replacing the overfit variants scattered across groups).
 defaults:
   - override /model: shape_vae
   - override /task: vae
   - override /data: shape_vae
-  # 想讓 LR 固定(更貼近 overfit)再打開這行:
+  # To fix the LR (closer to a pure overfit), uncomment this line:
   # - override /scheduler: null
 
-optimizer:               # 疊在 adamw 之上(保留 _target_/_partial_/betas)
-  lr: 1e-4               # 1e-3 會發散(實測 loss 衝到上千);1e-4 才穩定下降
-  weight_decay: 0        # 關掉 weight decay,別擋住擬合
+optimizer:               # layered on top of adamw (keeps _target_/_partial_/betas)
+  lr: 1e-4               # 1e-3 diverges (measured: loss shoots into the thousands); 1e-4 descends stably
+  weight_decay: 0        # turn off weight decay so it doesn't block fitting
 
-task:                    # 疊在 vae 之上(保留 _target_)
-  kl_weight: 0           # 關掉 KL,先確認重建能力
+task:                    # layered on top of vae (keeps _target_)
+  kl_weight: 0           # turn off KL, confirm reconstruction ability first
 
 trainer:
-  val_interval: 999999   # 實質關掉 val(overfit 只看 train loss)
-  amp: true              # 啟用 autocast(runner 用 bf16)以塞進 GPU 記憶體
+  val_interval: 999999   # effectively disable val (overfit only watches train loss)
+  amp: true              # enable autocast (runner uses bf16) to fit in GPU memory
 
-preprocess:              # 疊在 default 之上,只縮小取樣量加速每個 epoch
+preprocess:              # layered on top of default, only shrink sample counts to speed up each epoch
   num_surface_samples: 20000
   n_query_surface: 2000
   n_query_uniform: 500
 
-data:                    # obj_root/cache_dir/mode 由 data/shape_vae.yaml 提供;這裡只凍結取樣
+data:                    # obj_root/cache_dir/mode come from data/shape_vae.yaml; here we only freeze sampling
   train:
     dataset:
-      fixed_seed: 0      # 固定每個 epoch 的取樣 → 資料不再變動,才能乾淨收斂
+      fixed_seed: 0      # freeze each epoch's sampling → data stops changing, so it can converge cleanly
   val:
     dataset:
       fixed_seed: 0

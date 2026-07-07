@@ -1,18 +1,18 @@
 # Mesh -> Fourier-embedded surface points. Consumed by data/shape_vae.yaml via ${preprocess}.
-# Fourier 只作用在 xyz(3 維),normal/label 原樣 concat:
+# Fourier only acts on xyz (3 dims); normal/label are concatenated as-is:
 #   encoder_pe_dim = fourier(3).out_dim + (in_channels - 3) = 3*(2*pe_freqs+1) + 4 = 51 + 4 = 55
 #   decoder_pe_dim = fourier(3).out_dim                     = 3*(2*pe_freqs+1)     = 51
 _target_: src.model.shape.preprocess.Preprocessor
 pe_freqs: 8
 in_channels: 7              # xyz + normal + sharpedge label
 include_input: true
-include_pi: true            # Fourier 頻率乘上 π(官方 vae-v2-1 為 false;此處刻意設 true)
+include_pi: true            # multiply Fourier frequencies by π (official vae-v2-1 uses false; deliberately true here)
 random_sample_count: 2048   # FPS query points from random surface samples
 important_sample_count: 2048 # FPS query points from sharp edges
 down_sample_count: 4096     # surface (KV/data) points kept per branch
 num_surface_samples: 81920 # dense surface samples before downsampling
-n_query_surface: 200000     # SDF bank:近表面取樣數(離線一次,可大)
-n_query_uniform: 50000      # SDF bank:整個體積均勻取樣數(離線一次,可大)
-sdf_sample_point_count: 2000000  # mesh_to_sdf 表面取樣點數;預設 1e7→慢,2e6 速度約 3x 且GT精度幾乎不變(MAE  0.0001)
-sdf_subset: 16384           # 每個 step 從 SDF bank 抽幾個點來監督;null=全用(250k 會 OOM,decoder cross-attn 激活過大)。
-                            # 訓練用大 bank 時建議設(如 8192)以省 decoder 記憶體並提供每-epoch 變化
+n_query_surface: 200000     # SDF bank: near-surface sample count (offline once, can be large)
+n_query_uniform: 50000      # SDF bank: uniform-over-volume sample count (offline once, can be large)
+sdf_sample_point_count: 2000000  # mesh_to_sdf surface sample count; default 1e7 is slow, 2e6 is ~3x faster with almost no GT accuracy loss (MAE 0.0001)
+sdf_subset: 16384           # how many points to draw from the SDF bank to supervise per step; null=use all (250k OOMs, decoder cross-attn activations too large).
+                            # with a large bank, set this (e.g. 8192) to save decoder memory and give per-epoch variation

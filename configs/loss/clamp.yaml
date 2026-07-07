@@ -1,2 +1,2 @@
 _target_: src.engine.task.ClampedSDFLoss
-clamp_val: 0.1     # TSDF 夾 ±δ;⚠️ from-scratch 會 collapse,僅供對照
+clamp_val: 0.1     # TSDF clamp ±δ; ⚠️ collapses from-scratch, comparison only

@@ -3,5 +3,5 @@ entity: null
 name: null
 tags: []
 mode: disabled   # disabled | offline | online
-id: null         # resume 續訓時設成舊 run 的 id,才會接回同一條 wandb 曲線
-resume: null     # 搭配 id 使用:"allow" 或 "must"
+id: null         # for resuming, set to the old run's id to continue the same wandb curve
+resume: null     # use with id: "allow" or "must"

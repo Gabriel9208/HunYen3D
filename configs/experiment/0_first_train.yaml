@@ -16,7 +16,7 @@ trainer:
   amp: true        
   grad_accum_steps: 8      
 
-data:                    # obj_root/cache_dir/mode 由 data/shape_vae.yaml 提供;這裡只凍結取樣
+data:                    # obj_root/cache_dir/mode come from data/shape_vae.yaml; here we only freeze sampling
   train:
     dataset:
       fixed_seed: null

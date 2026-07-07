@@ -1,14 +1,17 @@
-"""Swap test:診斷 posterior collapse(decoder 到底有沒有在用 latent)。
+"""Swap test: diagnose posterior collapse (whether the decoder actually uses the latent).
 
-編碼形狀 A、B 各取 mu(用 mode,不取樣,去掉雜訊),比較用「對的」與「錯的」latent 重建 A:
+Encode shapes A and B, take mu each (use the mode, no sampling, drop noise), and compare
+reconstructing A with the "right" vs "wrong" latent:
   decode(z_A, qp_A) vs decode(z_B, qp_A)
-若換成錯的 latent z_B、重建 A 幾乎沒變差 → decoder 沒在用 latent = collapse。
-另外報 per-element KL 與 active-units 比例(KL>門檻的 latent 純量佔比),直接看塌沒塌。
+If swapping in the wrong latent z_B barely worsens the reconstruction of A → the decoder isn't
+using the latent = collapse.
+Also reports per-element KL and the active-units fraction (share of latent scalars with KL>threshold),
+a direct read of whether it collapsed.
 
-用法:
+Usage:
   uv run python scripts/swap_test.py +experiment=small \
       +ckpt=outputs/2026-07-02/00-58-58/checkpoints/last.pt
-  # 可選:+pairs=8
+  # optional: +pairs=8
 """
 
 from __future__ import annotations
@@ -54,8 +57,8 @@ def main(cfg: DictConfig) -> None:
             qp = a["query_points"].unsqueeze(0).to(device)
             gt = a["gt_sdf"].unsqueeze(0).to(device)
 
-            sdf_aa = model.decode(mu_a, qp)   # 對的 latent
-            sdf_ba = model.decode(mu_b, qp)   # 錯的 latent(B 的)重建 A
+            sdf_aa = model.decode(mu_a, qp)   # right latent
+            sdf_ba = model.decode(mu_b, qp)   # wrong latent (B's) reconstructing A
 
             recon.append(F.mse_loss(sdf_aa, gt).item())
             swap.append(F.mse_loss(sdf_ba, gt).item())
@@ -69,10 +72,10 @@ def main(cfg: DictConfig) -> None:
     print(f"\npairs={n_pairs}  ckpt={cfg.ckpt}")
     print(f"recon MSE (z_A→A)      : {r:.5f}")
     print(f"swap  MSE (z_B→A)      : {s:.5f}")
-    print(f"swap/recon ratio       : {s / max(r, 1e-9):.2f}x   (>>1 健康;≈1 = decoder 無視 latent = collapse)")
-    print(f"sign-flip 換 latent     : {st.mean(signflip) * 100:.1f}%   (換錯 latent 有多少查詢點內外翻面;≈0% = collapse)")
+    print(f"swap/recon ratio       : {s / max(r, 1e-9):.2f}x   (>>1 healthy; ≈1 = decoder ignores latent = collapse)")
+    print(f"sign-flip on swap       : {st.mean(signflip) * 100:.1f}%   (how many query points flip inside/outside with wrong latent; ≈0% = collapse)")
     print(f"mean per-elem KL       : {st.mean(kl_mean):.5f}")
-    print(f"active units (KL>1e-2) : {st.mean(active) * 100:.1f}%   (越低越塌)")
+    print(f"active units (KL>1e-2) : {st.mean(active) * 100:.1f}%   (lower = more collapsed)")
 
 
 if __name__ == "__main__":

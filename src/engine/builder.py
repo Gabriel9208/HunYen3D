@@ -16,8 +16,8 @@ def build_optimizer(cfg: DictConfig, params):
 def build_scheduler(cfg: DictConfig | None, optimizer, total_steps: int | None = None):
     if cfg is None:
         return None
-    # 若 config 把 T_max 留成 ???(missing),用 total_steps 自動補(= len(train_loader) × epochs);
-    # 使用者有明確設定 T_max 時則尊重該值;沒有 T_max 這個 key 的 scheduler 則略過。
+    # If the config leaves T_max as ??? (missing), fill it from total_steps (= len(train_loader) × epochs);
+    # respect an explicitly set T_max; skip schedulers that have no T_max key at all.
     kwargs = {}
     if total_steps is not None:
         try:

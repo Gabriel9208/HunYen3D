@@ -1,7 +1,7 @@
 # Shape VAE. Dims must stay consistent with the preprocess config (pe_freqs=8):
-#   encoder_pe_dim == query/data 寬度 = fourier(xyz) + normal + label = 3*(2*pe_freqs+1) + 4 = 51 + 4 = 55
-#   decoder_pe_dim == SDF 查詢點寬度 = fourier(xyz)               = 3*(2*pe_freqs+1)     = 51
-#   num_latents    == FPS query 長度 = random_sample_count + important_sample_count = 2048 + 2048 = 4096
+#   encoder_pe_dim == query/data width = fourier(xyz) + normal + label = 3*(2*pe_freqs+1) + 4 = 51 + 4 = 55
+#   decoder_pe_dim == SDF query point width = fourier(xyz)               = 3*(2*pe_freqs+1)     = 51
+#   num_latents    == FPS query length = random_sample_count + important_sample_count = 2048 + 2048 = 4096
 _target_: src.model.shape.VAE.vae.VAE
 num_latents: 4096
 encoder_pe_dim: 55

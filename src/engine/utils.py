@@ -8,8 +8,9 @@ import torch
 
 
 def cache_rel_path(mesh_rel: str) -> str:
-    """mesh 相對路徑 → 對應 .pt 相對路徑;剝掉 .gz 與 mesh 副檔名,讓 x.off / x.off.gz 都對到 x.pt。
-    build_cache.py / data.py / compress_cached_meshes.py 三處共用,避免命名漂移。"""
+    """Mesh relative path → the matching .pt relative path; strip .gz and the mesh
+    extension so x.off / x.off.gz both map to x.pt. Shared by build_cache.py / data.py /
+    compress_cached_meshes.py to avoid naming drift."""
     if mesh_rel.endswith(".gz"):
         mesh_rel = mesh_rel[:-3]
     return os.path.splitext(mesh_rel)[0] + ".pt"

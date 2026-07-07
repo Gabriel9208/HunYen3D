@@ -1,8 +1,8 @@
 # @package _global_
-# 縮小版:層數砍半、latent 砍半,用來快速跑對照實驗(非 SOTA)。
-# num_latents 綁 encoder query 長度 = random_sample_count + important_sample_count,
-# 所以砍 latent 必須連動砍這兩個(都是 light 參數,不在 cache_signature → 不會讓既有快取失效)。
-# width / latent_dim / pe_freqs 不動,只砍深度與 latent 數。
+# Small version: halve the layers, halve the latents, for fast comparison experiments (not SOTA).
+# num_latents is tied to the encoder query length = random_sample_count + important_sample_count,
+# so cutting latents must also cut those two (both light params, not in cache_signature → won't invalidate existing caches).
+# width / latent_dim / pe_freqs stay; only the depth and latent count are cut.
 defaults:
   - override /model: shape_vae
   - override /task: vae
@@ -14,8 +14,8 @@ model:
   num_decoder_layers: 8      # 16 -> 8
 
 preprocess:
-  random_sample_count: 1024      # 2048 -> 1024(隨 num_latents 連動)
-  important_sample_count: 1024   # 2048 -> 1024(隨 num_latents 連動)
+  random_sample_count: 1024      # 2048 -> 1024 (coupled to num_latents)
+  important_sample_count: 1024   # 2048 -> 1024 (coupled to num_latents)
 
 optimizer:
   lr: 3e-4

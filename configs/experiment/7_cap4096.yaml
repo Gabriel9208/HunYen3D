@@ -1,6 +1,6 @@
 # @package _global_
-# 容量實驗 B:num_latents=4096(latent 翻倍)。weighted MSE、from-scratch。
-# 與 6_cap2048 只差 num_latents(+連動取樣數),量「latent 容量 vs 近表面符號」。
+# Capacity experiment B: num_latents=4096 (double the latents). weighted MSE, from-scratch.
+# Differs from 6_cap2048 only in num_latents (+ coupled sampling counts); measures latent capacity vs near-surface sign.
 defaults:
   - override /model: shape_vae
   - override /task: vae
@@ -25,7 +25,7 @@ task:
 trainer:
   val_interval: 1
   amp: true
-  grad_accum_steps: 16   # batch 2 × 16 = 有效 32,與 6_cap2048(4×8)對齊
+  grad_accum_steps: 16   # batch 2 × 16 = effective 32, aligned with 6_cap2048 (4×8)
   resume: null
 
 data:

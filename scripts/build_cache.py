@@ -1,14 +1,15 @@
-"""離線預算前處理快取(訓練前跑一次)。
+"""Offline preprocessing cache (run once before training).
 
-對 train/val 的所有 .obj 跑 `Preprocessor.build_cache`(heavy:mesh_to_sdf + 表面取樣),
-把「大池 + SDF bank」存到 cache_dir/<mesh_stem>.pt,之後訓練走 light 模式只做便宜的子採樣。
+Runs `Preprocessor.build_cache` (heavy: mesh_to_sdf + surface sampling) over all .obj in
+train/val, saving the big pool + SDF bank to cache_dir/<mesh_stem>.pt; training then uses light
+mode and only does the cheap subsampling.
 
-用法:
-  uv run python scripts/build_cache.py +experiment=overfit        # 複用該實驗的 preprocess/data 參數
-  uv run python scripts/build_cache.py +experiment=overfit force=true   # 強制重建
+Usage:
+  uv run python scripts/build_cache.py +experiment=overfit        # reuse that experiment's preprocess/data params
+  uv run python scripts/build_cache.py +experiment=overfit force=true   # force rebuild
 
-可重現:每個 mesh 以確定 seed(以排序後的索引)取樣;mesh_to_sdf 給定 query 點為確定, 
-所以重跑會得到相同快取。
+Reproducible: each mesh is sampled with a deterministic seed (its sorted index); mesh_to_sdf is
+deterministic for given query points, so re-running yields the same cache.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import signal
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
-# 讓 `scripts/` 底下執行也能 import 到 repo 根目錄的 `src`
+# So running under scripts/ can still import `src` from the repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import hydra
@@ -34,13 +35,14 @@ from src.engine.utils import cache_rel_path, set_seed
 _PREPROCESSOR = None
 
 def _die_with_parent() -> None:
-    # ponytail: Linux-only。主程序一死(含關終端機的 SIGHUP、crash、SIGKILL),
-    # kernel 立刻對本 worker 送 SIGKILL,避免變 PPID=1 的孤兒殘留、繼續污染 cache。
-    # 天花板:若父在 prctl 前就死了(startup 極短窗口)則擋不到;跨平台要換 psutil 監看。
+    # ponytail: Linux-only. When the main process dies (incl. terminal SIGHUP, crash, SIGKILL),
+    # the kernel immediately sends this worker SIGKILL, so it won't become a PPID=1 orphan that
+    # keeps polluting the cache.
+    # Ceiling: if the parent dies before prctl (a tiny startup window) it isn't caught; cross-platform would need psutil polling.
     PR_SET_PDEATHSIG = 1
     libc = ctypes.CDLL("libc.so.6", use_errno=True)
     if libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL) != 0:
-        raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) 失敗")
+        raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) failed")
 
 
 def init_worker(cfg: DictConfig):
@@ -53,12 +55,12 @@ def _build_tasks(obj_root: str, cache_dir: str, force: bool,
     os.makedirs(cache_dir, exist_ok=True)
     paths = sorted(glob.glob(os.path.join(obj_root, "**", pattern), recursive=True))
     if not paths:
-        print(f"[build_cache] 警告:{obj_root} 下沒有符合 {pattern!r} 的 mesh,略過")
+        print(f"[build_cache] warning: no mesh matching {pattern!r} under {obj_root}, skipping")
         return []
 
     tasks = []
     for idx, p in enumerate(paths):
-        # 鏡像 obj_root 的相對路徑(換成 .pt),避免不同子目錄同名(如 ShapeNet hash 重名)互相覆蓋。
+        # Mirror obj_root's relative path (as .pt) so same-named meshes in different subdirs (e.g. ShapeNet hash collisions) don't overwrite each other.
         out = os.path.join(cache_dir, cache_rel_path(os.path.relpath(p, obj_root)))
         tasks.append((idx, p, out, force))
     return tasks
@@ -85,13 +87,13 @@ def main(cfg: DictConfig) -> None:
         ds = cfg.data[split].dataset
         cache_dir = ds.get("cache_dir")
         if cache_dir is None:
-            raise ValueError(f"data.{split}.dataset.cache_dir 未設定")
-        # 同一個 (obj_root, cache_dir) 只跑一次
+            raise ValueError(f"data.{split}.dataset.cache_dir is not set")
+        # Run each (obj_root, cache_dir) only once
         key = f"{ds.obj_root}->{cache_dir}"
         if key in seen:
             continue
         seen.add(key)
-        pattern = ds.get("pattern", "*.obj")  # 與 ObjMeshDataset 同一來源(data config)
+        pattern = ds.get("pattern", "*.obj")  # same source as ObjMeshDataset (data config)
         tasks = _build_tasks(ds.obj_root, cache_dir, force, pattern)
         with ProcessPoolExecutor(
             max_workers=8,

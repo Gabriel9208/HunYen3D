@@ -1,9 +1,9 @@
-"""視覺化重建品質:encoder → decoder → Postprocess(marching cubes)。
+"""Visualize reconstruction quality: encoder → decoder → Postprocess (marching cubes).
 
-對 val 幾個形狀:編碼取 mu、decode 出 SDF grid、marching cubes 還原 mesh,
-存 .off,並用 pyrender 離屏渲染,和「正規化後的 GT」並排成一張 PNG(左 GT、右 recon)。
+For a few val shapes: encode to mu, decode an SDF grid, marching-cubes back to a mesh, save .off,
+and render off-screen with pyrender, side by side with the normalized GT as one PNG (left GT, right recon).
 
-用法:
+Usage:
   uv run python scripts/viz_recon.py +experiment=small \
       +ckpt=/abs/best.pt +shapes=8 [+resolution=128] [+name=recon]
 """
@@ -14,12 +14,12 @@ import gzip
 import os
 import sys
 
-os.environ.setdefault("PYOPENGL_PLATFORM", "egl")  # headless 離屏,須在 import pyrender 前設
+os.environ.setdefault("PYOPENGL_PLATFORM", "egl")  # headless off-screen; must be set before importing pyrender
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import hydra
-import mesh_to_sdf  # noqa: F401 — 必須在 pyrender 前 import(它會 monkeypatch OpenGL);Preprocessor 也會用到
+import mesh_to_sdf  # noqa: F401 — must be imported before pyrender (it monkeypatches OpenGL); Preprocessor uses it too
 import numpy as np
 import pyrender
 import torch
@@ -35,7 +35,7 @@ W = H = 512
 
 
 def load_normalized(mesh_path: str, preprocessor) -> trimesh.Trimesh:
-    # ponytail: gz-aware 載入這幾行和 preprocess.build_cache:330-335 重複,不為單一 caller 重構 preprocess。
+    # ponytail: this gz-aware loading duplicates preprocess.build_cache:330-335; not worth refactoring preprocess for a single caller.
     if mesh_path.endswith(".gz"):
         inner = os.path.splitext(mesh_path[:-3])[1].lstrip(".")
         with gzip.open(mesh_path, "rb") as f:
@@ -53,18 +53,18 @@ def _look_at(eye, target=(0, 0, 0), up=(0, 1, 0)) -> np.ndarray:
     r /= np.linalg.norm(r)
     u = np.cross(r, f)
     pose = np.eye(4, dtype=np.float32)
-    pose[:3, 0], pose[:3, 1], pose[:3, 2], pose[:3, 3] = r, u, -f, eye  # 相機看 -Z
+    pose[:3, 0], pose[:3, 1], pose[:3, 2], pose[:3, 3] = r, u, -f, eye  # camera looks down -Z
     return pose
 
 
 def render(mesh: trimesh.Trimesh | None, renderer: pyrender.OffscreenRenderer) -> np.ndarray:
     if mesh is None:
-        return np.zeros((H, W, 3), np.uint8)  # 無重建 → 黑面板
+        return np.zeros((H, W, 3), np.uint8)  # no reconstruction → black panel
     scene = pyrender.Scene(ambient_light=[0.35, 0.35, 0.35], bg_color=[0, 0, 0])
     scene.add(pyrender.Mesh.from_trimesh(mesh, smooth=False))
-    pose = _look_at(eye=(2.0, 1.5, 2.6))  # 看 [-1,1] cube 的 3/4 視角
+    pose = _look_at(eye=(2.0, 1.5, 2.6))  # 3/4 view of the [-1,1] cube
     scene.add(pyrender.PerspectiveCamera(yfov=np.pi / 3.0), pose=pose)
-    scene.add(pyrender.DirectionalLight(intensity=3.0), pose=pose)  # 光跟相機
+    scene.add(pyrender.DirectionalLight(intensity=3.0), pose=pose)  # light follows the camera
     color, _ = renderer.render(scene)
     return color[..., :3]
 
@@ -78,7 +78,7 @@ def main(cfg: DictConfig) -> None:
 
     ds = instantiate(cfg.data.val.dataset)
     post = Postprocess(ds.preprocessor.fourier_embedder, resolution=int(cfg.get("resolution", 128)))
-    out = os.path.join(get_original_cwd(), "results", cfg.get("name", "recon"))  # 釘專案根,別埋進 hydra run 目錄
+    out = os.path.join(get_original_cwd(), "results", cfg.get("name", "recon"))  # pin to project root, not the hydra run dir
     n = min(int(cfg.get("shapes", 8)), len(ds))
 
     renderer = pyrender.OffscreenRenderer(W, H)
@@ -96,16 +96,16 @@ def main(cfg: DictConfig) -> None:
             gt.export(base + "_gt.off")
             if recon is None:
                 no_surface += 1
-                print(f"[{i}] {rel}  無零穿越表面 (None)")
+                print(f"[{i}] {rel}  no zero-crossing surface (None)")
             else:
                 recon.export(base + "_recon.off")
                 print(f"[{i}] {rel}  recon verts={len(recon.vertices)}")
 
-            cmp = np.hstack([render(gt, renderer), render(recon, renderer)])  # 左 GT | 右 recon
+            cmp = np.hstack([render(gt, renderer), render(recon, renderer)])  # left GT | right recon
             Image.fromarray(cmp).save(base + "_cmp.png")
     renderer.delete()
 
-    print(f"\n完成 {n} 個 → {out}/  (無表面 {no_surface}/{n});PNG 左=GT 右=recon")
+    print(f"\ndone {n} → {out}/  (no surface {no_surface}/{n}); PNG left=GT right=recon")
 
 
 if __name__ == "__main__":
