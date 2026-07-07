@@ -1,0 +1,48 @@
+# @package _global_
+# Capacity experiment (depth): enc6/dec12 layers, up from small's enc4/dec8; num_latents fixed 2048.
+# weighted MSE, from-scratch. Only the layer counts differ from 6_cap2048 -- isolates whether
+# network depth (not latent width) is the near-surface bottleneck.
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /data: shape_vae
+
+model:
+  num_latents: 2048
+  num_encoder_layers: 6
+  num_decoder_layers: 12
+
+preprocess:
+  random_sample_count: 1024      # + important = 2048 = num_latents
+  important_sample_count: 1024
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+
+trainer:
+  val_interval: 1
+  amp: true
+  grad_accum_steps: 16   # batch 2 × 16 = effective 32, aligned with 6_cap2048 (4×8)
+  resume: null
+
+data:
+  batch_size: 2        # smoke_test: batch 4 OOM, batch 2 = 8.77 GiB OK
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: 8_cap_6_12_layers
+  tags: []
+  mode: online
+  id: null
+  resume: allow
