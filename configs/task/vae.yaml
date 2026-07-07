@@ -1,2 +1,3 @@
 _target_: src.engine.task.VAETask
 kl_weight: 1.0e-3
+# recon_loss 由 loss config group 注入(見 config.yaml defaults);預設 weighted

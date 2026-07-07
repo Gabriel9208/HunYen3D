@@ -1,0 +1,5 @@
+_target_: src.engine.task.SignAwareSDFLoss
+near_weight: 4.0
+near_beta: 100.0     # 用 sweep 勝出的 β
+sign_weight: 0.1     # α:符號項相對距離項比重;設 0 退回純加權 MSE。掃 {0.03,0.1,0.3}
+sign_temp: 30.0      # k:sigmoid 陡度,符號梯度帶寬 ~3/k。掃 {10,30,100}

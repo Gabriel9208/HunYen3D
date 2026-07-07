@@ -2,6 +2,7 @@
 defaults:
   - override /model: shape_vae
   - override /task: vae
+  - override /loss@task.recon_loss: clamp   # 換成 TSDF clamp loss
   - override /data: shape_vae
 
 model:
@@ -18,8 +19,9 @@ optimizer:
   weight_decay: 0
 
 task:
-  kl_weight: 1e-3 # 1e-4 -> 1e-3 
-  clamp_val: 0.1 # new
+  kl_weight: 1e-4
+  recon_loss:
+    clamp_val: 0.1   # δ,可調
 
 trainer:
   val_interval: 1
@@ -38,8 +40,8 @@ data:
 wandb:
   project: HunYen3D
   entity: null
-  name: null
+  name: 2_clamp
   tags: []
   mode: online 
-  id: pvibw3fs
+  id: null
   resume: allow

@@ -1,0 +1,3 @@
+_target_: src.engine.task.WeightedSDFLoss
+near_weight: 4.0   # λ:近表面額外權重
+near_beta: 30.0    # β:權重隨 |sdf| 衰減速度;設 0 退化成 unweighted MSE
