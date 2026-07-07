@@ -23,8 +23,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from src.engine.utils import get_device, set_seed
-
-BANDS = [(0.0, 0.02, "near |gt|<0.02"), (0.02, 0.1, "mid  0.02-0.1"), (0.1, 9.9, "far  >0.1")]
+from src.metrics import BandedSDFMetrics, OccupancyIoU
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -48,28 +47,19 @@ def main(cfg: DictConfig) -> None:
     pred = torch.cat(preds).flatten()
     gt = torch.cat(gts).flatten()
 
+    diag = BandedSDFMetrics()(pred, gt)
+    iou = OccupancyIoU()(pred, gt)
+
     print(f"\nshapes={n}  points={gt.numel():,}  ckpt={cfg.ckpt}")
     print(f"overall MSE      : {(pred - gt).pow(2).mean():.5f}")
     print(f"overall RMS      : {(pred - gt).pow(2).mean().sqrt():.4f}  (SDF 尺度 ~[-1,1])")
-    sign_ok = (pred.sign() == gt.sign())
-    print(f"sign accuracy    : {sign_ok.float().mean() * 100:.2f}%  (整體;遠場好猜會灌高)")
-
-    # occupancy IoU:sdf<0 視為內部
-    pi, gi = pred < 0, gt < 0
-    inter = (pi & gi).sum().float()
-    union = (pi | gi).sum().float()
-    print(f"occupancy IoU    : {(inter / union.clamp(min=1)) * 100:.2f}%")
+    print(f"sign accuracy    : {diag['overall_sign_acc']:.2f}%  (整體;遠場好猜會灌高)")
+    print(f"occupancy IoU    : {iou * 100:.2f}%")
 
     print("按距離分帶(pred0/pred1 = 全吐 0 / 全吐 1 的對照基準;model MSE ≈ pred0 = 該帶等於沒學):")
-    for lo, hi, name in BANDS:
-        m = (gt.abs() >= lo) & (gt.abs() < hi)
-        if m.any():
-            frac = m.float().mean() * 100
-            mse = (pred[m] - gt[m]).pow(2).mean()
-            zero = gt[m].pow(2).mean()          # 全 predict 0
-            one = (1.0 - gt[m]).pow(2).mean()   # 全 predict 1
-            sacc = (pred[m].sign() == gt[m].sign()).float().mean() * 100
-            print(f"  {name:<16} 佔比{frac:5.1f}%  MSE={mse:.5f}  (pred0={zero:.5f} pred1={one:.5f})  sign-acc={sacc:5.1f}%")
+    for name, b in diag["bands"].items():
+        print(f"  {name:<16} 佔比{b['frac']:5.1f}%  MSE={b['mse']:.5f}  "
+              f"(pred0={b['pred0']:.5f} pred1={b['pred1']:.5f})  sign-acc={b['sign_acc']:5.1f}%")
 
 
 if __name__ == "__main__":
