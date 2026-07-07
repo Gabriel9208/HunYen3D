@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import glob
 import os
+import signal
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
@@ -31,8 +33,19 @@ from src.engine.utils import cache_rel_path, set_seed
 
 _PREPROCESSOR = None
 
+def _die_with_parent() -> None:
+    # ponytail: Linux-only。主程序一死(含關終端機的 SIGHUP、crash、SIGKILL),
+    # kernel 立刻對本 worker 送 SIGKILL,避免變 PPID=1 的孤兒殘留、繼續污染 cache。
+    # 天花板:若父在 prctl 前就死了(startup 極短窗口)則擋不到;跨平台要換 psutil 監看。
+    PR_SET_PDEATHSIG = 1
+    libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    if libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL) != 0:
+        raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG) 失敗")
+
+
 def init_worker(cfg: DictConfig):
     global _PREPROCESSOR
+    _die_with_parent()
     _PREPROCESSOR = instantiate(cfg)
 
 def _build_tasks(obj_root: str, cache_dir: str, force: bool,
