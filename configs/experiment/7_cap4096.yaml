@@ -1,0 +1,47 @@
+# @package _global_
+# 容量實驗 B:num_latents=4096(latent 翻倍)。weighted MSE、from-scratch。
+# 與 6_cap2048 只差 num_latents(+連動取樣數),量「latent 容量 vs 近表面符號」。
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /data: shape_vae
+
+model:
+  num_latents: 4096
+  num_encoder_layers: 4
+  num_decoder_layers: 8
+
+preprocess:
+  random_sample_count: 2048      # + important = 4096 = num_latents
+  important_sample_count: 2048
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+
+trainer:
+  val_interval: 1
+  amp: true
+  grad_accum_steps: 16   # batch 2 × 16 = 有效 32,與 6_cap2048(4×8)對齊
+  resume: null
+
+data:
+  batch_size: 2        # smoke_test:batch 4 OOM,batch 2 = 9.15 GiB OK
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: 7_cap4096
+  tags: []
+  mode: online
+  id: null
+  resume: allow
