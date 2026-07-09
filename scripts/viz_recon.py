@@ -4,7 +4,7 @@ For a few val shapes: encode to mu, decode an SDF grid, marching-cubes back to a
 and render off-screen with pyrender, side by side with the normalized GT as one PNG (left GT, right recon).
 
 Usage:
-  uv run python scripts/viz_recon.py +experiment=small \
+  uv run python scripts/viz_recon.py +experiment=base_small \
       +ckpt=/abs/best.pt +shapes=8 [+resolution=128] [+name=recon]
 """
 

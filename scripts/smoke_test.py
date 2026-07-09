@@ -4,8 +4,8 @@ Exercises the full training path (encode → decode → backward → optimizer.s
 data, so it directly verifies whether memory settings like sdf_subset / bf16 fit.
 
 Usage:
-  uv run python scripts/smoke_test.py +experiment=first_train
-  uv run python scripts/smoke_test.py +experiment=first_train steps=5
+  uv run python scripts/smoke_test.py +experiment=base_first_train
+  uv run python scripts/smoke_test.py +experiment=base_first_train steps=5
 """
 
 from __future__ import annotations

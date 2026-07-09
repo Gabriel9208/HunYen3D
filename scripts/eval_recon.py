@@ -7,7 +7,7 @@ by |gt_sdf| distance, plus geometrically meaningful metrics:
 Reconstructs with a fixed mu (no sampling) on each shape's own query points.
 
 Usage:
-  uv run python scripts/eval_recon.py +experiment=small \
+  uv run python scripts/eval_recon.py +experiment=base_small \
       +ckpt=/abs/path/last.pt +shapes=16
 """
 

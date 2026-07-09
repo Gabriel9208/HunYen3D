@@ -5,8 +5,8 @@ original mesh again (see src/engine/data.py ObjMeshDataset.__getitem__), so cach
 safely compressed (reversible, not deleted).
 
 Usage:
-  uv run python scripts/compress_cached_meshes.py +experiment=first_train dry_run=true  # preview
-  uv run python scripts/compress_cached_meshes.py +experiment=first_train               # actually compress
+  uv run python scripts/compress_cached_meshes.py +experiment=base_first_train dry_run=true  # preview
+  uv run python scripts/compress_cached_meshes.py +experiment=base_first_train               # actually compress
 
 Note: after compression, build_cache.py's `*.off` glob won't match `.off.gz`; if you later rebuild
 the cache with different heavy params (force=true), the compressed items are silently skipped and

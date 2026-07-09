@@ -69,7 +69,7 @@ configs/                    Hydra config groups (see Configuration)
   model/ task/ data/        model, loss/task, dataset configs
   optimizer/ scheduler/     adamw, cosine
   trainer/ wandb/ preprocess/
-  experiment/               overfit.yaml, first_train.yaml (used via +experiment=)
+  experiment/               base_overfit.yaml, base_first_train.yaml (used via +experiment=)
 scripts/
   build_cache.py            offline preprocessing-cache builder (run before training)
   test_mesh.py              mesh preprocessing sanity check
@@ -108,7 +108,7 @@ Training defaults to **light** mode, which reads a precomputed cache. Build it o
 experiment before training:
 
 ```bash
-uv run python scripts/build_cache.py +experiment=first_train
+uv run python scripts/build_cache.py +experiment=base_first_train
 ```
 
 This materializes the expensive, deterministic preprocessing (mesh→SDF, surface sampling)
@@ -118,10 +118,10 @@ into `cache/<mesh_stem>.pt`. See [Preprocessing & caching](#preprocessing--cachi
 
 ```bash
 # Full training run
-uv run python main.py +experiment=first_train
+uv run python main.py +experiment=base_first_train
 
 # Overfit a single mesh — the standard sanity check before any real run
-uv run python main.py +experiment=overfit
+uv run python main.py +experiment=base_overfit
 ```
 
 ### Common overrides
@@ -129,10 +129,10 @@ uv run python main.py +experiment=overfit
 Any config field can be overridden on the command line:
 
 ```bash
-uv run python main.py +experiment=first_train trainer.max_epochs=200 optimizer.lr=1e-4
-uv run python main.py +experiment=first_train scheduler.T_max=5000   # pin the cosine period
-uv run python main.py +experiment=first_train scheduler=null         # disable LR scheduling
-uv run python main.py +experiment=first_train trainer.resume=/abs/path/to/last.pt
+uv run python main.py +experiment=base_first_train trainer.max_epochs=200 optimizer.lr=1e-4
+uv run python main.py +experiment=base_first_train scheduler.T_max=5000   # pin the cosine period
+uv run python main.py +experiment=base_first_train scheduler=null         # disable LR scheduling
+uv run python main.py +experiment=base_first_train trainer.resume=/abs/path/to/last.pt
 ```
 
 By default `scheduler.T_max` is left unset (`???`) and the runner computes it automatically

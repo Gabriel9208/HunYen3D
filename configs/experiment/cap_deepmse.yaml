@@ -1,6 +1,6 @@
 # @package _global_
 # Deeper net (enc6/dec12) + plain unweighted MSE (near_beta=0) + cosine scheduler (LR decays),
-# 7 epochs. Same as 9_deep_mse_nosched but with the scheduler ON (9 stalled at constant LR).
+# 7 epochs. Same as cap_deepmse_nosched but with the scheduler ON (9 stalled at constant LR).
 defaults:
   - override /model: shape_vae
   - override /task: vae
@@ -43,7 +43,7 @@ data:
 wandb:
   project: HunYen3D
   entity: null
-  name: 10_deep_mse
+  name: cap_deepmse
   tags: []
   mode: online
   id: null

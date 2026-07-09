@@ -1,10 +1,10 @@
 # @package _global_
-# Sign decoupling (hinge version): weighted MSE + α·relu(margin − pred·sign(gt)). Penalizes the sign
-# with basic math, replacing BCE which blows pred up (see 4_sign_aware's failure). Sweep α via task.recon_loss.sign_weight.
+# Sign decoupling: weighted MSE (distance) + α·BCE (sign). From-scratch small model.
+# Sweep α/k via task.recon_loss.sign_weight / task.recon_loss.sign_temp; sign_weight=0 reverts to plain weighted MSE.
 defaults:
   - override /model: shape_vae
   - override /task: vae
-  - override /loss@task.recon_loss: sign_hinge
+  - override /loss@task.recon_loss: sign_aware   # switch to SignAwareSDFLoss
   - override /data: shape_vae
 
 model:
@@ -41,7 +41,7 @@ data:
 wandb:
   project: HunYen3D
   entity: null
-  name: 5_sign_hinge
+  name: loss_sign_aware
   tags: []
   mode: online
   id: null

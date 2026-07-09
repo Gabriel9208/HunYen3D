@@ -1,7 +1,6 @@
 # @package _global_
-# Near-surface weighted MSE (WeightedSDFLoss), from-scratch small model.
-# Uses the default weighted group (configs/loss/weighted.yaml); tune λ/β via
-#   task.recon_loss.near_weight / task.recon_loss.near_beta; near_beta=0 degenerates to unweighted.
+# Capacity experiment A: num_latents=2048 (the current small model). weighted MSE, from-scratch.
+# Differs from cap_latent4096 only in num_latents (+ coupled sampling counts); measures latent capacity vs near-surface sign.
 defaults:
   - override /model: shape_vae
   - override /task: vae
@@ -13,7 +12,7 @@ model:
   num_decoder_layers: 8
 
 preprocess:
-  random_sample_count: 1024
+  random_sample_count: 1024      # + important = 2048 = num_latents
   important_sample_count: 1024
 
 optimizer:
@@ -30,7 +29,7 @@ trainer:
   resume: null
 
 data:
-  batch_size: 4
+  batch_size: 4        # confirmed runnable via smoke_test
   train:
     dataset:
       fixed_seed: null
@@ -41,7 +40,7 @@ data:
 wandb:
   project: HunYen3D
   entity: null
-  name: 3_weighted
+  name: cap_latent2048
   tags: []
   mode: online
   id: null

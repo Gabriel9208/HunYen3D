@@ -5,8 +5,8 @@ train/val, saving the big pool + SDF bank to cache_dir/<mesh_stem>.pt; training 
 mode and only does the cheap subsampling.
 
 Usage:
-  uv run python scripts/build_cache.py +experiment=overfit        # reuse that experiment's preprocess/data params
-  uv run python scripts/build_cache.py +experiment=overfit force=true   # force rebuild
+  uv run python scripts/build_cache.py +experiment=base_overfit        # reuse that experiment's preprocess/data params
+  uv run python scripts/build_cache.py +experiment=base_overfit force=true   # force rebuild
 
 Reproducible: each mesh is sampled with a deterministic seed (its sorted index); mesh_to_sdf is
 deterministic for given query points, so re-running yields the same cache.

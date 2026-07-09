@@ -1,10 +1,10 @@
 # @package _global_
-# Sign decoupling: weighted MSE (distance) + α·BCE (sign). From-scratch small model.
-# Sweep α/k via task.recon_loss.sign_weight / task.recon_loss.sign_temp; sign_weight=0 reverts to plain weighted MSE.
+# Near-surface weighted MSE (WeightedSDFLoss), from-scratch small model.
+# Uses the default weighted group (configs/loss/weighted.yaml); tune λ/β via
+#   task.recon_loss.near_weight / task.recon_loss.near_beta; near_beta=0 degenerates to unweighted.
 defaults:
   - override /model: shape_vae
   - override /task: vae
-  - override /loss@task.recon_loss: sign_aware   # switch to SignAwareSDFLoss
   - override /data: shape_vae
 
 model:
@@ -41,7 +41,7 @@ data:
 wandb:
   project: HunYen3D
   entity: null
-  name: 4_sign_aware
+  name: loss_weighted
   tags: []
   mode: online
   id: null

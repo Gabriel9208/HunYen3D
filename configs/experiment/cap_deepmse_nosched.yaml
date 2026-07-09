@@ -44,7 +44,7 @@ data:
 wandb:
   project: HunYen3D
   entity: null
-  name: 9_deep_mse_nosched
+  name: cap_deepmse_nosched
   tags: []
   mode: online
   id: null

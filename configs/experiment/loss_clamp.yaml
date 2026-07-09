@@ -40,7 +40,7 @@ data:
 wandb:
   project: HunYen3D
   entity: null
-  name: 2_clamp
+  name: loss_clamp
   tags: []
   mode: online 
   id: null

@@ -9,7 +9,7 @@ Also reports per-element KL and the active-units fraction (share of latent scala
 a direct read of whether it collapsed.
 
 Usage:
-  uv run python scripts/swap_test.py +experiment=small \
+  uv run python scripts/swap_test.py +experiment=base_small \
       +ckpt=outputs/2026-07-02/00-58-58/checkpoints/last.pt
   # optional: +pairs=8
 """
