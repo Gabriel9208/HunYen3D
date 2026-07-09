@@ -1,0 +1,51 @@
+# @package _global_
+# Deeper net (enc6/dec12) + plain unweighted MSE (near_beta=0, no weighting/hinge)
+# + no scheduler (constant LR), 5 epochs. Tests deep + simplest loss + constant LR.
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /loss@task.recon_loss: weighted   # WeightedSDFLoss; near_beta=0 below makes it plain MSE
+  - override /scheduler: null                  # turn off the scheduler -> constant LR
+  - override /data: shape_vae
+
+model:
+  num_latents: 2048
+  num_encoder_layers: 6      # small=4
+  num_decoder_layers: 12     # small=8
+
+preprocess:
+  random_sample_count: 1024
+  important_sample_count: 1024
+
+optimizer:
+  lr: 3e-4                   # constant (no scheduler)
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0             # degenerates WeightedSDFLoss to plain unweighted MSE
+
+trainer:
+  val_interval: 1
+  amp: true
+  grad_accum_steps: 16       # batch 2 × 16 = effective 32
+  resume: null
+
+data:
+  batch_size: 2              # enc6/dec12 OOMs at batch 4 (smoke-tested)
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: 9_deep_mse_nosched
+  tags: []
+  mode: online
+  id: null
+  resume: allow
