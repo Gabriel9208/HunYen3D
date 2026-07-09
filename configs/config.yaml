@@ -11,6 +11,10 @@ defaults:
   - _self_
 
 # Run each job from its own output dir, so checkpoints/ and logs are isolated per run.
+# Group by experiment first, timestamp second: outputs/<experiment>/<timestamp>/
+# (falls back to _base_ when run without +experiment=).
 hydra:
   job:
     chdir: true
+  run:
+    dir: outputs/${oc.select:hydra.runtime.choices.experiment,_base_}/${now:%Y-%m-%d_%H-%M-%S}
