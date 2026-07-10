@@ -72,7 +72,7 @@ configs/                    Hydra config groups (see Configuration)
   experiment/               base_overfit.yaml, base_first_train.yaml (used via +experiment=)
 scripts/
   build_cache.py            offline preprocessing-cache builder (run before training)
-  test_mesh.py              mesh preprocessing sanity check
+  evaluate.py               checkpoint geometry eval (SDF metrics; +viz adds Chamfer + PNG)
 src/
   model/                    ShapeVAE (encoder/decoder/attention/preprocess)
   engine/                   Trainer + run (runner.py), builder, task, data,
