@@ -1,0 +1,49 @@
+# @package _global_
+# Capacity fusion: deep (enc6/dec12) + num_latents=4096 — combines the two confirmed levers
+# (depth §5c, latent width §5a). weighted MSE, from-scratch. batch_size set from smoke_test below.
+# ponytail: kl=1e-4 kept for comparability, but 4096 is fragile here (§5a) — bump KL / add
+# free-bits if the posterior goes pathological (μ-path eval MSE ≫ sample-path).
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /data: shape_vae
+
+model:
+  num_latents: 4096
+  num_encoder_layers: 6
+  num_decoder_layers: 12
+
+preprocess:
+  random_sample_count: 2048      # + important = 4096 = num_latents
+  important_sample_count: 2048
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+
+trainer:
+  val_interval: 1
+  amp: true
+  grad_accum_steps: 32   # batch 1 × 32 = effective 32 (batch 2 OOMs at 15.47 GiB, smoke-tested)
+  resume: null
+
+data:
+  batch_size: 1        # deep+4096 OOMs at batch 2; batch 1 confirmed via smoke_test
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: cap_deep_latent4096
+  tags: []
+  mode: online
+  id: null
+  resume: allow

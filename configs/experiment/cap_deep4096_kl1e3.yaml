@@ -1,0 +1,49 @@
+# @package _global_
+# Heal the fragile 4096 posterior: same as the deep+4096 fusion (enc6/dec12, latent 4096) but with
+# kl_weight 1e-3 (10× the 1e-4 default) to pull σ back toward 1 so μ stays on-manifold. At 1e-4 the
+# 4096 posterior went pathological (σ→5, μ-eval IoU 31.6% vs deep+2048's 45%, §5a). Blunt test
+# before trying free-bits; if 1e-3 collapses instead, free-bits is the refined fix.
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /data: shape_vae
+
+model:
+  num_latents: 4096
+  num_encoder_layers: 6
+  num_decoder_layers: 12
+
+preprocess:
+  random_sample_count: 2048      # + important = 4096 = num_latents
+  important_sample_count: 2048
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-3                 # 10× default — tame the drifting 4096 posterior
+
+trainer:
+  val_interval: 1
+  amp: true
+  grad_accum_steps: 32   # batch 1 × 32 = effective 32 (batch 2 OOMs at 15.47 GiB, smoke-tested)
+  resume: null
+
+data:
+  batch_size: 1        # deep+4096 OOMs at batch 2; batch 1 confirmed via smoke_test
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: cap_deep4096_kl1e3
+  tags: []
+  mode: online
+  id: null
+  resume: allow
