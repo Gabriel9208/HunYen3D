@@ -8,13 +8,42 @@ learned*, including dead ends. Results are interpreted as evidence about methods
 leaderboard numbers (see the README's scope note: resources are limited and SOTA is not the
 goal).
 
-> **Guiding lesson (retrospective).** Much of §1–4 chased near-surface **sign-accuracy** as if it
-> were the objective. It isn't. Good sign-acc is neither sufficient nor necessary for good
-> reconstruction — it's a **saturating proxy** that tops out below marching-cubes resolution (full
-> argument in §5b). Its proper role is an **auxiliary diagnostic**: a quick read on whether surface
-> detail is being learned at all. So the loss-engineering line that tried to *manufacture* sign
-> (BCE §3, hinge §5d) was optimising a proxy — the target metric is mesh geometry (IoU / Chamfer /
-> `viz_recon`), and losses/capacity should be judged by that.
+## TL;DR — where this stands
+
+**Headline: none of the new loss designs were the lever — the bottleneck is model capacity.**
+Clamp, near-surface weighting, sign-BCE and sign-hinge all left near-surface sign-accuracy at ~52%
+(coin flip). Systematic elimination (the Arc below) traced the real bottleneck to **capacity /
+generalisation to 45k shapes**; and the metric we had been chasing — near-sign-acc — turned out to
+be a **saturating proxy**, not a real target. What actually moves reconstruction (measured by
+IoU / Chamfer / eyeballing the mesh) is **more capacity + longer training**: network depth, latent
+count, and epochs. The loss-engineering line was solving the wrong problem.
+
+## The Arc — problem → tried → verdict → led to
+
+Read top-to-bottom as the storyline; each phase's verdict hands the next its question. §-refs point
+into the Deep-dive section below.
+
+| Phase | Problem being chased | Tried | Verdict | Led to |
+|---|---|---|---|---|
+| **A. Clamp** (§1) | Small model: low MSE but broken geometry (near-band sign ≈50%) | DeepSDF TSDF clamp ±0.1 | **Collapse** — clamp removes the far-field anchor → posterior collapse | Keep the anchor; up-weight near surface instead |
+| **B. Loss engineering** (§2–3) | MSE's surface gradient vanishes (∝ residual → 0 at the surface) | near-weighting → sign-BCE → sign-hinge | near-sign stuck ~52% for **every** loss / β / α | Maybe it isn't the loss at all |
+| **C. The funnel** (§4) | Is it loss / architecture / sampling-KL / capacity? | eliminate one at a time + single-mesh overfit | single mesh → **95%**, 45k → **53%** → capacity/generalisation | Vary capacity, not loss |
+| **D. Metric reframe** (§5b) | Is near-sign even the right target? | analyse what near-sign can physically resolve | it's a **saturating proxy** (below the RMS floor & MC resolution) | Judge by IoU / Chamfer / mesh |
+| **E. Capacity levers** (§5a, 5c) | Which capacity axis helps? | latent 2048→4096, depth 4/8→6/12, longer training | **all help** (IoU↑); loss does not | Go deeper + wider + longer |
+
+## ⚠️ Comparability of the numbers
+
+Epoch counts differ across experiments (3 / 7 / 10 ep), so **cross-row IoU is a trend, not a fair
+comparison.** The controlled, same-epoch pairs actually worth comparing:
+
+- **Under-training?** — weighted β=100, same config: **3 ep IoU ~30% → 10 ep IoU 46%**. Loss keeps
+  falling with epochs yet near-sign stays flat → *not* under-training, structural.
+- **Latent width** — `cap_latent2048` vs `cap_latent4096`, both 3 ep, eff-batch 32: **27% vs 32.5%**
+  (4096 helps *when its posterior stays healthy* — fragile at kl=1e-4).
+- **Depth × latent fusion** — `cap_deep_latent4096` (enc6/dec12 + 4096, 7 ep) *running*; compares
+  against `cap_deepmse` (enc6/dec12 + 2048, 7 ep, IoU 45%) at matched depth & epochs.
+
+Everything else (e.g. depth at 7 ep vs shallow at 10 ep) mixes epoch counts and is directional only.
 
 ## Papers
 
@@ -30,21 +59,22 @@ goal).
 
 ## Experiments
 
-| Date | Paper / Idea | Hypothesis | Change | Dataset | Result / Observation | Next step |
-|------|--------------|------------|--------|---------|----------------------|-----------|
-| 2026-06 | Hunyuan3D-2 ShapeVAE (baseline) | The hand-written VAE can fit a single mesh, confirming the encode→KL→decode→SDF path and loss are wired correctly | Overfit one mesh: `+experiment=overfit` (lr 1e-4, kl_weight 0, fixed_seed, bf16) | 1 mesh | Train loss → ~0.003 by ~epoch 69. Reproduction path validated. | Move to a small multi-mesh set (`+experiment=first_train`); turn KL back on (γ≈1e-4) and watch recon vs. KL. |
-| 2026-07-03 | None | None | first_train caue OOM. Lower the self-attention layer head num to half of the original and reduce FPS query points from 4096 to 2048 (uniform 1024 + sharp edge 1024) | 3DShape2VecSet Watertight mesh dataset | Training reconstruction loss → 0.00? and kl loss → 0.2. However, the result looks good but its awful near| |
-| 2026-07-05 | DeepSDF (TSDF clamp) | Clamping the far field to ±δ stops it dominating the MSE and focuses capacity near the surface | Clamp pred & gt to [−0.1, 0.1] before MSE (`clamp_val=0.1`) | small (~45k) | **Collapse from-scratch**: KL→1e-5, val loss flat 0.0083 ×27 ep, output RMS≈16, IoU 0%, marching cubes empty 4/4. See detailed §1 | Abandon clamp for from-scratch; keep far-field anchor |
-| 2026-07-06 | Near-surface weighting (own construction) | Up-weight near surface *without* removing the far-field anchor that clamp destroyed | `w = 1 + λ·exp(−β·|gt|)`, loss Σ(w·se)/Σw; β∈{30,60,100}, λ=4; 3 epochs | small, 16 val | IoU 5.65%→**25–30%** (β=100 best); **near sign-acc stuck ~52%** for all β. 10-ep follow-up: loss 5× lower, IoU 46%, but near sign-acc only 53.5% → **structural, not under-training**. See §2 | Sign-decoupled loss (§3) |
-| 2026-07-06 | Occupancy Nets / 3DShape2VecSet (sign decouple) | A BCE sign term supplies the non-vanishing surface gradient MSE lacks | `SignAwareSDFLoss = weighted-MSE + α·BCE(−k·pred, gt<0)`, same head; α,k Hydra-tunable | small (staged) | Self-check: **~380× stronger gradient** at a surface sign-error vs weighted-MSE; not yet trained. See §3 | Run `4_sign_aware`, sweep α∈{.03,.1,.3}, k∈{10,30,100} |
-| 2026-07-07 | Sign-hinge (own) + isolation diagnostics | Is the stuck near sign-acc the loss, the architecture, sampling/KL, or capacity? | `SignHingeSDFLoss` α-sweep {0.1,0.5}; then single-mesh overfit (deterministic & real VAE path) | small + 1-mesh | hinge near sign flat ~52% across α → **not loss**. Single-mesh overfit: deterministic **92%**, real VAE path (σ≈1) **95%** → **not architecture, not sampling/KL**. Isolated to **capacity/generalization to 45k**. See §4 | Capacity experiment: num_latents 2048 vs 4096 (`6_cap2048` / `7_cap4096`) |
-| 2026-07-07/08 | Capacity — latent width | Does doubling `num_latents` help? | `6_cap2048` vs `7_cap4096`, 3 ep, eff-batch 32 | small 45k | 2048: IoU 27%. 4096 **run 1**: μ-path eval broken (σ→5, posterior pathological, MSE 0.11, IoU 14). **Rerun (identical config, 07-09)**: posterior healthy, μ-MSE 0.00227, **IoU 32% > 2048's 27%**. ⚠️ Same config → one pathological, one healthy: 4096 helps *when stable* but is fragile at kl=1e-4. See §5a | Free-bits to stabilise 4096; depth |
-| 2026-07-08 | Depth (enc6/dec12) + metric reframe | Is it network depth? Is near-sign even the right target? | `8_cap_6_12_layers`; 3 ep (stalled) then 7 ep | small 45k | 3 ep stalled at val 0.013 (short cosine killed LR); 7 ep trains fine (val→0.0016). **IoU 27%→38%** (depth is a real lever) while near-sign flat ~54% → near-sign is a **saturating proxy**, IoU/mesh is the target. viz: both meshes coarse, depth smoother/less fragmented. See §5 | Deeper+longer; judge by IoU/Chamfer/viz |
-| 2026-07-09 | Deep + plain MSE, scheduler on/off | Does constant LR (no scheduler) help the deep net with the simplest loss? | `9_deep_mse_nosched` (const LR) vs `10_deep_mse` (cosine, 7 ep) | small 45k | const-LR **stalls** (val ~0.03 flat/rising — can't settle without decay). `10_deep_mse` (cosine) running. See §5 | (pending) |
+| Date | Paper / Idea | Hypothesis | Change | Dataset | Ep | Result / Observation | Next step |
+|------|--------------|------------|--------|---------|----|----------------------|-----------|
+| 2026-06 | Hunyuan3D-2 ShapeVAE (baseline) | The hand-written VAE can fit a single mesh, confirming the encode→KL→decode→SDF path and loss are wired correctly | Overfit one mesh: `+experiment=overfit` (lr 1e-4, kl_weight 0, fixed_seed, bf16) | 1 mesh | ~69 | Train loss → ~0.003 by ~epoch 69. Reproduction path validated. | Move to a small multi-mesh set (`+experiment=first_train`); turn KL back on (γ≈1e-4) and watch recon vs. KL. |
+| 2026-07-03 | None | None | first_train caue OOM. Lower the self-attention layer head num to half of the original and reduce FPS query points from 4096 to 2048 (uniform 1024 + sharp edge 1024) | 3DShape2VecSet Watertight mesh dataset | ? | Training reconstruction loss → 0.00? and kl loss → 0.2. However, the result looks good but its awful near| |
+| 2026-07-05 | DeepSDF (TSDF clamp) | Clamping the far field to ±δ stops it dominating the MSE and focuses capacity near the surface | Clamp pred & gt to [−0.1, 0.1] before MSE (`clamp_val=0.1`) | small (~45k) | 27 | **Collapse from-scratch**: KL→1e-5, val loss flat 0.0083 ×27 ep, output RMS≈16, IoU 0%, marching cubes empty 4/4. See detailed §1 | Abandon clamp for from-scratch; keep far-field anchor |
+| 2026-07-06 | Near-surface weighting (own construction) | Up-weight near surface *without* removing the far-field anchor that clamp destroyed | `w = 1 + λ·exp(−β·\|gt\|)`, loss Σ(w·se)/Σw; β∈{30,60,100}, λ=4 | small, 16 val | 3→10 | IoU 5.65%→**25–30%** (β=100 best); **near sign-acc stuck ~52%** for all β. 10-ep follow-up: loss 5× lower, IoU 46%, but near sign-acc only 53.5% → **structural, not under-training**. See §2 | Sign-decoupled loss (§3) |
+| 2026-07-06 | Occupancy Nets / 3DShape2VecSet (sign decouple) | A BCE sign term supplies the non-vanishing surface gradient MSE lacks | `SignAwareSDFLoss = weighted-MSE + α·BCE(−k·pred, gt<0)`, same head; α,k Hydra-tunable | small (staged) | — | Self-check: **~380× stronger gradient** at a surface sign-error vs weighted-MSE; not yet trained. See §3 | Run `4_sign_aware`, sweep α∈{.03,.1,.3}, k∈{10,30,100} |
+| 2026-07-07 | Sign-hinge (own) + isolation diagnostics | Is the stuck near sign-acc the loss, the architecture, sampling/KL, or capacity? | `SignHingeSDFLoss` α-sweep {0.1,0.5}; then single-mesh overfit (deterministic & real VAE path) | small + 1-mesh | 3 / 1 / 8k-st | hinge near sign flat ~52% across α → **not loss**. Single-mesh overfit: deterministic **92%**, real VAE path (σ≈1) **95%** → **not architecture, not sampling/KL**. Isolated to **capacity/generalization to 45k**. See §4 | Capacity experiment: num_latents 2048 vs 4096 (`6_cap2048` / `7_cap4096`) |
+| 2026-07-07/08 | Capacity — latent width | Does doubling `num_latents` help? | `6_cap2048` vs `7_cap4096`, eff-batch 32 | small 45k | 3 | 2048: IoU 27%. 4096 **run 1**: μ-path eval broken (σ→5, posterior pathological, MSE 0.11, IoU 14). **Rerun (identical config, 07-09)**: posterior healthy, μ-MSE 0.00227, **IoU 32% > 2048's 27%**. ⚠️ Same config → one pathological, one healthy: 4096 helps *when stable* but is fragile at kl=1e-4. See §5a | Free-bits to stabilise 4096; depth |
+| 2026-07-08 | Depth (enc6/dec12) + metric reframe | Is it network depth? Is near-sign even the right target? | `8_cap_6_12_layers` | small 45k | 3→7 | 3 ep stalled at val 0.013 (short cosine killed LR); 7 ep trains fine (val→0.0016). **IoU 27%→38%** (depth is a real lever) while near-sign flat ~54% → near-sign is a **saturating proxy**, IoU/mesh is the target. viz: both meshes coarse, depth smoother/less fragmented. See §5 | Deeper+longer; judge by IoU/Chamfer/viz |
+| 2026-07-09 | Deep + plain MSE, scheduler on/off | Does constant LR (no scheduler) help the deep net with the simplest loss? | `9_deep_mse_nosched` (const LR) vs `10_deep_mse` (cosine) | small 45k | 5 / 7 | const-LR **stalls** (val ~0.03 flat/rising — can't settle without decay). `10_deep_mse` (cosine, 7 ep): **IoU 45%** at enc6/dec12+2048. See §5c | Fuse depth+4096 (`cap_deep_latent4096`, running) |
 
-## Detailed entries — SDF loss design (2026-07)
+## Deep dive — why each step happened (§1–5)
 
-The line of work on *why* the small model has low MSE but broken geometry. Format per step:
+The supporting detail behind the Arc: *why* each thing was tried and what it proved, with citations.
+The Arc table up top is the map; this is the terrain. Format per step:
 **Motivation / Decision / Result / Why / References** (which paper, in which scenario, used which
 method to solve what — and, honestly, where we have no citation).
 
@@ -217,16 +247,22 @@ reconstruction.** Sign-acc is a thresholded view of near-RMS, and it saturates a
 So near-sign was a *useful diagnostic* (it drove the whole §1–4 narrowing) but the **wrong target**.
 The right target is actual mesh geometry: **IoU / Chamfer / normal-consistency / eyeballing the
 mesh** (`viz_recon`). Built `src/metrics/` for this — `OccupancyIoU`, `ChamferDistance` (scipy
-cKDTree, points→scalar), and `diagnose/BandedSDFMetrics` (the near/mid/far sign-acc kept as an
-internal diagnostic). Standard metrics for reporting, banded sign-acc for debugging.
+cKDTree, points→scalar), and `diagnose/BandedSDFMetrics`.
 
-**Consequence for loss design.** Sign-acc's proper role is an *auxiliary read* on whether surface
-detail is being learned — not a quantity to build a loss around. The whole line that tried to
-*manufacture* the sign (BCE §3, hinge §5d, and the sign-motivated weighting §2) was engineering a
-proxy. This does **not** mean those losses are worthless — only that near-sign was the wrong lens to
-judge them; their real question (do they improve **IoU/mesh**?) was never actually measured (§5d).
-Going forward, judge any loss/capacity change by mesh geometry, and read sign-acc only as a sanity
-check that the near band is being touched at all.
+**Sign-acc was dropped entirely (2026-07-10).** Even as a diagnostic it is less defensible than a
+continuous error read: it saturates below the RMS floor / MC resolution (the same reason it failed
+as a target). It is replaced by **banded RMS** in `BandedSDFMetrics` — per-band `rms` plus
+`rms_ratio = band-RMS / predict-all-0 RMS` (ratio <1 = the band beats predicting zero, ≈1 = learned
+nothing, >1 = worse than zero). This localises *which* band is failing (near/mid/far), which the
+aggregate IoU/Chamfer can't. Division of labour: **IoU / Chamfer / mesh = the target**; **banded RMS
+= the training-health diagnostic**. (Caveat that keeps it honest: low banded RMS is necessary, not
+sufficient — the whole saga began from "MSE low, geometry broken", so the mesh stays the arbiter.)
+
+**Consequence for loss design.** The whole line that tried to *manufacture* the sign (BCE §3, hinge
+§5d, sign-motivated weighting §2) was engineering a proxy. This does **not** mean those losses are
+worthless — only that near-sign was the wrong lens to judge them; their real question (do they
+improve **IoU/mesh**?) was never actually measured (§5d). Going forward, judge any loss/capacity
+change by mesh geometry, with banded RMS to localise the failing band.
 
 **5c. Depth (enc6/dec12) — the real lever, but the LR schedule matters.**
 Deeper net (enc6/dec12, up from small's 4/8), num_latents fixed 2048. 3-epoch run **stalled** at
