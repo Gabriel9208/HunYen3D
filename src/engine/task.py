@@ -151,12 +151,13 @@ class VAETask(BaseTask):
     `r` in `recon + r * KL` and is config-driven.
     """
 
-    def __init__(self, recon_loss, kl_weight: float = 1.0e-3) -> None:
+    def __init__(self, recon_loss, kl_weight: float = 1.0e-3, deterministic: bool = False) -> None:
         self.recon_loss = recon_loss
         self.kl_weight = kl_weight
+        self.deterministic = deterministic  # True → train on z=μ (no sampling), the pure-capacity overfit path
 
     def step(self, model: nn.Module, batch) -> StepOutput:
-        z, kl = model.encode(batch["query"], batch["data"])
+        z, kl = model.encode(batch["query"], batch["data"], sample_posterior=not self.deterministic)
 
         return self.compute_loss(model, batch, z, kl)
 

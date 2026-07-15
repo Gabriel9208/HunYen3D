@@ -1,0 +1,14 @@
+# @package _global_
+# Grid cell A: latent 2048, enc4/dec8 (small). Batch/accum from the OOM-tested cap_latent2048.
+# random+important sample counts must sum to num_latents (they are light params, not in cache_signature).
+model:
+  num_latents: 2048
+  num_encoder_layers: 4
+  num_decoder_layers: 8
+preprocess:
+  random_sample_count: 1024
+  important_sample_count: 1024
+data:
+  batch_size: 4
+trainer:
+  grad_accum_steps: 8      # 4 × 8 = effective 32

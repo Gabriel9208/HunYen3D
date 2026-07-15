@@ -1,0 +1,57 @@
+# @package _global_
+# Stage-1 PURE-CAPACITY gate: overfit ONE fixed train mesh (deterministic sorted()[0]) with z=μ (no sampling,
+# no KL) to prove the architecture CAN memorise one shape. Capacity is monotone → run only the SMALLEST cell
+# (A); if A passes, every larger cell trivially has enough capacity. PASS bar = train RMS < 0.02 (near-band
+# width) + mesh visually matches. Deterministic z=μ means σ is never sampled → no σ-explosion even at kl=0.
+# Launch:  +experiment=grid_overfit   (default cell A; escalate with capacity=B_... only if A fails).
+# Eval the memorised mesh: scripts/evaluate.py +experiment=grid_overfit +ckpt=<abs last.pt>  (μ-path; val is
+# pointed at the same single train mesh below).
+defaults:
+  # model/task/loss(weighted)/data already selected in config.yaml; add the capacity cell then this body
+  # (`_self_` last so batch=1/accum=1 below override the cell's train-time batch/accum).
+  - /capacity: A_lat2048_l4_8                  # smallest cell (capacity monotone); escalate via capacity=<cell>
+  - override /scheduler: null                  # overfit uses CONSTANT LR (no cosine decay → no false plateau)
+  - _self_
+
+optimizer:
+  lr: 1e-4                # 1e-3 diverges on overfit (base_overfit note); 1e-4 descends stably
+  weight_decay: 0
+
+task:
+  deterministic: true     # z=μ, no sampling → pure capacity test (§4 test 8), and σ can't explode at kl=0
+  kl_weight: 0            # no regulariser: classic overfit/capacity test. Safe here ONLY because z=μ (σ unused)
+  recon_loss:
+    near_beta: 0          # plain unweighted MSE
+
+trainer:
+  val_interval: 999999    # overfit only watches train loss
+  amp: true
+  resume: null
+  max_epochs: 3000        # deterministic + constant LR memorises fast; stop early once train RMS < 0.02
+  ckpt_interval: 999999   # overfit: skip per-epoch saves (ckpt is ~3GB); runner still saves once at the end
+  grad_accum_steps: 1     # override capacity: 1 mesh → optimizer steps every batch
+
+data:
+  batch_size: 1           # override capacity: single mesh
+  train:
+    dataset:
+      fixed_seed: 0       # freeze sampling → clean convergence
+      max_meshes: 1       # the deterministic sorted()[0] train mesh
+  val:                    # eval the SAME single train mesh post-hoc (obj_root → data/train)
+    dataset:
+      obj_root: ${hydra:runtime.cwd}/data/train
+      fixed_seed: 0
+      max_meshes: 1
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: grid_overfit_${hydra:runtime.choices.capacity}
+  tags: [grid, overfit]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/grid_overfit/${hydra:runtime.choices.capacity}/${now:%Y-%m-%d_%H-%M-%S}

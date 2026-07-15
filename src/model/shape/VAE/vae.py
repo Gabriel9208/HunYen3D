@@ -57,13 +57,15 @@ class VAE(nn.Module):
             num_layers=num_decoder_layers,
         )
 
-    def encode(self, query, data):
+    def encode(self, query, data, sample_posterior: bool = True):
+        # sample_posterior=False → z=μ (deterministic, distribution.mode()); used by the pure-capacity
+        # overfit so σ is never sampled → no σ-explosion even at kl=0. Mirrors Hunyuan's encode flag.
         mu, logvar = self.encoder(query, data)
         distribution = Gaussian(mu, logvar)
-        sample = distribution.sample()
+        z = distribution.sample() if sample_posterior else distribution.mode()
         kl = distribution.kl_divergence()
-        
-        return sample, kl
+
+        return z, kl
 
     def decode(self, z, query_pe):
         reconstructed = self.decoder(query_pe, z) # (B, q_len, )

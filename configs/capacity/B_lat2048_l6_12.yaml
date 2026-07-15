@@ -1,0 +1,13 @@
+# @package _global_
+# Grid cell B: latent 2048, enc6/dec12 (deep). Batch/accum from the OOM-tested cap_depth612/cap_deepmse.
+model:
+  num_latents: 2048
+  num_encoder_layers: 6
+  num_decoder_layers: 12
+preprocess:
+  random_sample_count: 1024
+  important_sample_count: 1024
+data:
+  batch_size: 2
+trainer:
+  grad_accum_steps: 16     # 2 × 16 = effective 32

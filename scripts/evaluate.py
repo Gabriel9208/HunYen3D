@@ -29,9 +29,9 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from src.engine.utils import get_device, set_seed
-from src.metrics import BandedSDFMetrics, ChamferDistance, OccupancyIoU
+from src.metrics import SIOU, VIOU, ChamferDistance, FScore, NormalConsistency
 
-_CHAMFER_SAMPLES = 50_000  # ponytail: surface points per cloud; plenty for a stable estimate, still cheap
+_SURF_SAMPLES = 50_000  # ponytail: surface points per cloud for chamfer/f-score/NC; stable yet cheap
 
 
 def _viz_setup(cfg: DictConfig, ds):
@@ -96,9 +96,15 @@ def _viz_setup(cfg: DictConfig, ds):
         cmp = np.hstack([_render(gt_mesh), _render(recon_mesh)])  # left GT | right recon
         Image.fromarray(cmp).save(base + "_cmp.png")
 
+    def sample_pn(mesh, n: int):
+        """Surface points + per-point normals (from the sampled face), for chamfer/f-score/NC."""
+        pts, fi = trimesh.sample.sample_surface(mesh, n)
+        return np.asarray(pts), np.asarray(mesh.face_normals[fi])
+
     out = os.path.join(get_original_cwd(), "results", cfg.get("name", "recon"))  # project root, not the hydra run dir
     post = Postprocess(ds.preprocessor.fourier_embedder, resolution=int(cfg.get("resolution", 128)))
-    return SimpleNamespace(post=post, renderer=renderer, out=out, load_gt=load_gt, save_pair=save_pair)
+    return SimpleNamespace(post=post, renderer=renderer, out=out, load_gt=load_gt,
+                           save_pair=save_pair, sample_pn=sample_pn)
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -113,14 +119,33 @@ def main(cfg: DictConfig) -> None:
     viz = bool(cfg.get("viz", False))
     v = _viz_setup(cfg, ds) if viz else None
 
+    # +samples=K averages K decoded fields from z~N(mu,sigma) instead of decode(mu). Discriminates
+    # posterior collapse (sample-avg still bad → info gone) from mu being an off-manifold point
+    # (sample-avg recovers → info present, mu is just a bad point in the high-dim latent).
+    K = int(cfg.get("samples", 0))
+
+    # tau must exceed the marching-cubes cell size (2/res); at res 128 that's ~0.0156, so 0.01 would
+    # score agreement finer than a vertex can be placed (discretisation-noise floor). Default above it.
+    fscore_tau = float(cfg.get("fscore_tau", 0.02))
     preds, gts = [], []
-    chamfers: list[float] = []
+    chamfers, fscores, ncs = [], [], []  # per-shape mesh metrics (only shapes with an extracted surface)
     no_surface = 0
+    mu_vecs, sig_rms = [], []  # per-shape flattened mu and rms(sigma): mu-spread=collapse, sigma=shell size
     with torch.no_grad():
         for i in range(n):
             it = ds[i]
-            mu, _ = model.encoder(it["query"].unsqueeze(0).to(device), it["data"].unsqueeze(0).to(device))
-            pred = model.decode(mu, it["query_points"].unsqueeze(0).to(device)).squeeze(0).cpu()
+            q = it["query"].unsqueeze(0).to(device)
+            data = it["data"].unsqueeze(0).to(device)
+            qp = it["query_points"].unsqueeze(0).to(device)
+            mu, logvar = model.encoder(q, data)
+            std = torch.exp(0.5 * logvar)
+            mu_vecs.append(mu.flatten().cpu())
+            sig_rms.append(std.pow(2).mean().sqrt().item())
+            if K > 0:
+                fields = [model.decode(mu + std * torch.randn_like(std), qp).squeeze(0) for _ in range(K)]
+                pred = torch.stack(fields).mean(0).cpu()
+            else:
+                pred = model.decode(mu, qp).squeeze(0).cpu()
             preds.append(pred)
             gts.append(it["gt_sdf"])
 
@@ -130,35 +155,51 @@ def main(cfg: DictConfig) -> None:
                 rel = os.path.splitext(os.path.relpath(ds.paths[i], ds.obj_root).removesuffix(".gz"))[0]
                 v.save_pair(os.path.join(v.out, rel), gt_mesh, recon)
                 if recon is None:
-                    no_surface += 1
-                    print(f"[{i}] {rel}  no zero-crossing surface (None)")
+                    no_surface += 1  # chamfer/f-score/NC uncomputable for this shape → recorded as N/A below
+                    print(f"[{i}] {rel}  no zero-crossing surface (None) → chamfer/f-score/NC = N/A")
                 else:
-                    cd = ChamferDistance()(recon.sample(_CHAMFER_SAMPLES), gt_mesh.sample(_CHAMFER_SAMPLES))
-                    chamfers.append(cd)
-                    print(f"[{i}] {rel}  recon verts={len(recon.vertices)}  chamfer={cd:.5f}")
+                    rp, rn = v.sample_pn(recon, _SURF_SAMPLES)
+                    gp, gn = v.sample_pn(gt_mesh, _SURF_SAMPLES)
+                    cd = ChamferDistance()(rp, gp)
+                    fs = FScore(tau=fscore_tau)(rp, gp)
+                    nc = NormalConsistency()(rp, rn, gp, gn)
+                    chamfers.append(cd); fscores.append(fs); ncs.append(nc)
+                    print(f"[{i}] {rel}  verts={len(recon.vertices)}  chamfer={cd:.5f}  "
+                          f"f-score={fs:.4f}  NC={nc:.4f}")
+
+    import math
+    import statistics as _st
 
     pred = torch.cat(preds).flatten()
     gt = torch.cat(gts).flatten()
-    diag = BandedSDFMetrics()(pred, gt)
-    iou = OccupancyIoU()(pred, gt)
+    v_iou = VIOU()(pred, gt)          # occupancy IoU over all query points
+    s_iou = SIOU()(pred, gt)          # occupancy IoU restricted to the near-surface band
 
-    print(f"\nshapes={n}  points={gt.numel():,}  ckpt={cfg.ckpt}")
-    print(f"overall MSE      : {(pred - gt).pow(2).mean():.5f}")
-    print(f"overall RMS      : {(pred - gt).pow(2).mean().sqrt():.4f}  (SDF scale ~[-1,1])")
-    print(f"occupancy IoU    : {iou * 100:.2f}%")
+    def _iou_str(x: float) -> str:
+        return "N/A (empty band)" if math.isnan(x) else f"{x * 100:.2f}%"
+
+    def _mesh_agg(vals: list[float]) -> str:  # mean over shapes with a surface; explicit N/A when none
+        good = [x for x in vals if not math.isnan(x)]
+        return f"N/A (0/{n} shapes)" if not good else f"{sum(good) / len(good):.5f}  ({len(good)}/{n} shapes)"
+
+    mode = f"sample-avg K={K}" if K > 0 else "mu-path"
+    print(f"\nshapes={n}  points={gt.numel():,}  eval={mode}  ckpt={cfg.ckpt}")
+    mu_spread = torch.stack(mu_vecs).std(0).mean().item()  # per-elem std across shapes, averaged
+    d = mu_vecs[0].numel()
+    print(f"sigma_rms        : {_st.mean(sig_rms):.4f}  shell radius ~ {_st.mean(sig_rms) * d**0.5:.1f} "
+          f"(sigma_rms*sqrt({d}))  [posterior diagnostic]")
+    print(f"mu-spread        : {mu_spread:.5f}  per-elem std across shapes  (near 0 = collapse)  [diagnostic]")
+    print(f"overall RMS      : {(pred - gt).pow(2).mean().sqrt():.4f}  (SDF scale ~[-1,1])  [diagnostic]")
+    print(f"V-IoU (all pts)  : {_iou_str(v_iou)}")
+    print(f"S-IoU (|gt|<0.02): {_iou_str(s_iou)}")
     if viz:
-        mean_cd = sum(chamfers) / len(chamfers) if chamfers else float("nan")
-        print(f"chamfer (mean)   : {mean_cd:.5f}  over {len(chamfers)}/{n} shapes with a surface "
-              f"(no surface {no_surface}/{n})")
-
-    print("banded RMS by |gt| (rms_ratio = band RMS / predict-all-0 RMS; <1 = beats predicting zero, ≈1 = learned nothing):")
-    for name, b in diag["bands"].items():
-        print(f"  {name:<16} frac{b['frac']:5.1f}%  RMS={b['rms']:.5f}  "
-              f"ratio={b['rms_ratio']:5.2f}  (baseline pred0-RMS={b['pred0'] ** 0.5:.5f})")
-
-    if viz:
+        print(f"chamfer          : {_mesh_agg(chamfers)}   (no surface {no_surface}/{n} → N/A)")
+        print(f"f-score@{fscore_tau:g}     : {_mesh_agg(fscores)}")
+        print(f"normal-consist.  : {_mesh_agg(ncs)}")
         v.renderer.delete()
         print(f"\nviz → {v.out}/  (PNG left=GT right=recon)")
+    else:
+        print("chamfer/f-score/NC: add +viz=true to extract meshes and compute these")
 
 
 if __name__ == "__main__":

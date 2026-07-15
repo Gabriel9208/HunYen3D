@@ -25,12 +25,16 @@ class ObjMeshDataset(Dataset):
 
     def __init__(self, obj_root: str, preprocessor, pattern: str = "*.obj",
                  mode: str = "light", cache_dir: str | None = None,
-                 fixed_seed: int | None = None):
+                 fixed_seed: int | None = None, max_meshes: int | None = None):
         self.paths = sorted(
             glob.glob(os.path.join(obj_root, "**", pattern), recursive=True)
         )
         if not self.paths:
             raise FileNotFoundError(f"No meshes matching {pattern!r} under {obj_root!r}")
+        # max_meshes truncates the (sorted → deterministic) list, e.g. =1 for single-mesh overfit:
+        # the same shape every run and across configs, reusing the existing cache (no separate data dir).
+        if max_meshes is not None:
+            self.paths = self.paths[:max_meshes]
         self.obj_root = obj_root
         self.preprocessor = preprocessor
         self.mode = mode

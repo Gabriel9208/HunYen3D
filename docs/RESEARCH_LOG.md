@@ -1,306 +1,203 @@
 # Research Log
 
-A running, reverse-chronological log of the research process behind HunYen3D: papers read,
-methods tried, the hypothesis behind each, and what the results actually showed.
+Reproducing & improving the **Hunyuan3D-2 ShapeVAE** — a VecSet VAE: encode surface points → latent
+set → decode SDF. Single RTX 5080, ~45k ShapeNet watertight meshes (3DShape2VecSet dataset).
 
-The point is not a tidy changelog — it's to capture *why* something was tried and *what was
-learned*, including dead ends. Results are interpreted as evidence about methods, not as
-leaderboard numbers (see the README's scope note: resources are limited and SOTA is not the
-goal).
+## Primer — what this project is (read first)
 
-## TL;DR — where this stands
+- **Task & I/O.** Given a mesh's surface points, the encoder maps them to a latent set; a decoder then
+  predicts, for any 3D query point, its **SDF** (signed distance to the surface: <0 inside, >0 outside,
+  0 on it). The model **regresses a continuous SDF** — it does *not* output occupancy. Occupancy / IoU
+  numbers are **derived** from the SDF by its sign (inside = SDF<0). *(The reference papers
+  3DShape2VecSet / OccNet supervise occupancy with BCE; we regress SDF with MSE — "occupancy+BCE" below
+  is background, not our objective.)*
+- **Architecture.** VecSet VAE: encoder cross-attention → **a set of N latent tokens, each of width 64**
+  (`num_latents` N ∈ {2048, 4096}; `latent_dim` = 64) → KL → decoder cross-attention → per-query SDF.
+  N (token count) and 64 (per-token width) are *separate* axes; **total latent dim d = N×64 ≈ 1.3e5** at
+  N=2048. Mesh is extracted from the predicted SDF field by **marching cubes (MC)**.
+- **Objective.** Plain or near-surface-weighted **MSE on the SDF**, plus a **KL** regulariser weighted by
+  `kl_weight`.
+- **Experiment layout — the "grid" and "cells".** Capacity experiments form a **2×2 grid** over
+  `num_latents {2048, 4096} × depth {enc4/dec8, enc6/dec12}`, labelled **cells A–D** (table in Stage-2
+  below). **Cell A** = the smallest (2048, enc4/dec8); capacity is monotone, so A is the floor.
+- **Scale anchors (is a number good?).** IoU / F-score / NC are 0–1, higher is better; Chamfer and MSE
+  are errors, lower is better. Reference points: overfitting *one* mesh is the ceiling (F-score ~1.0,
+  IoU ~90%, Chamfer ~0.009); the real 45k-generalisation task currently reaches **IoU ~45%**
+  (current-best, **not** a solved target — real headroom remains).
 
-**Headline: none of the new loss designs were the lever — the bottleneck is model capacity.**
-Clamp, near-surface weighting, sign-BCE and sign-hinge all left near-surface sign-accuracy at ~52%
-(coin flip). Systematic elimination (the Arc below) traced the real bottleneck to **capacity /
-generalisation to 45k shapes**; and the metric we had been chasing — near-sign-acc — turned out to
-be a **saturating proxy**, not a real target. What actually moves reconstruction (measured by
-IoU / Chamfer / eyeballing the mesh) is **more capacity + longer training**: network depth, latent
-count, and epochs. The loss-engineering line was solving the wrong problem.
+## Glossary & notation
 
-## The Arc — problem → tried → verdict → led to
+**Acronyms.** VAE (variational autoencoder) · SDF (signed distance field) · TSDF (truncated SDF) ·
+MSE (mean-squared error) · BCE (binary cross-entropy) · KL (Kullback–Leibler divergence) · ELBO
+(evidence lower bound) · MC (marching cubes — mesh extraction from the SDF grid) · IoU
+(intersection-over-union) · NC (normal consistency) · FPS (farthest-point sampling) · DiT (diffusion
+transformer) · VecSet (the latent-set representation from 3DShape2VecSet).
 
-Read top-to-bottom as the storyline; each phase's verdict hands the next its question. §-refs point
-into the Deep-dive section below.
+**Notation.** `encN/decM` = N encoder / M decoder layers · `klXeY` = `kl_weight` = X·10⁻ʸ (e.g.
+`kl1e-4`) · `cell A–D` = the four grid configs · `rand+imp` = counts of random + importance
+(near-surface) query points · `sample-avg (K=32)` = decode K latent samples z∼N(μ,σ), average the SDF
+fields · `μ-path` = decode the posterior mean μ deterministically.
 
-| Phase | Problem being chased | Tried | Verdict | Led to |
+**Symbols.** μ = posterior mean · σ = posterior std · d = total latent dim (≈1.3e5) · gt = ground-truth
+SDF · `|gt|<0.02` = query points within 0.02 of the surface (coords normalised to ~[−1,1]) · σ√d =
+radius of the Gaussian sample shell in latent space.
+
+## TL;DR
+
+- **The bottleneck is capacity / generalisation to 45k shapes — not the loss.** Clamp, near-surface
+  weighting, sign-BCE and sign-hinge all left near-surface sign-acc ~52% (coin flip). A one-hypothesis-
+  at-a-time funnel traced it to capacity, not any loss term.
+- **Depth helps; latent width does not.** enc4/dec8→enc6/dec12 lifted IoU 27→38% (single-mesh ceiling
+  ~90%, so this is still deep in "poor"). Doubling latents 2048→4096
+  did **not** beat 2048 at matched depth/epochs (~7 pt real gap, survives sample-avg eval). Don't spend
+  GPU on 4096.
+- **near-sign-acc was the wrong target** — a thresholded proxy that saturates below the RMS floor and MC
+  resolution. Judge geometry by **IoU / Chamfer / NC / F-score / eyeballing the mesh**.
+- **decode(μ) is not guaranteed by the ELBO.** The "μ-eval broke" on high-KL / long-training runs was an
+  **eval artifact, not a model break** — sample-averaged eval recovers the geometry. Eval a *sample*
+  (field standard) or stay in a healthy-posterior regime. Not a KL problem; KL is a usable knob.
+- **Capacity gate PASSED (2026-07-15):** the smallest cell memorises one mesh to F-score 1.00, NC 0.94,
+  Chamfer 0.009, S-IoU 90%. Architecture is sufficient → the 2×2 grid is unblocked.
+
+## Hard-won process lessons (the expensive ones)
+
+- **Overfit ONE mesh FIRST, before any generalisation run.** The isolation funnel (07-07, timeline
+  below) burned days on loss engineering while the real bottleneck was capacity; the single-mesh overfit
+  is what finally isolated it. Capacity is **monotone** → overfitting the *smallest* cell clears the
+  whole grid. This is now a mandatory Stage-1 gate, not an afterthought.
+- **Every quick diagnostic needs a matched control.** Two diagnostics faked effects purely from small-
+  batch / no-KL setups ("BCE is unstable", "σ explodes") — only a control run in the same setup exposed
+  them as artifacts.
+- **Don't judge geometry by a thresholded metric.** near-sign saturates; it drove the diagnosis but was
+  never a legitimate target.
+- **Don't confuse "decode(μ) broke" with "model broke".** Check a sample-path eval before blaming KL or
+  training length.
+- **Ops:** Blackwell (RTX 5080) throws random `cudaErrorLaunchTimeout` on long runs even at `-pl 300` →
+  save checkpoints so a late crash still leaves a usable one.
+
+## Stage-1 — Capacity gate: overfit one mesh (2026-07-15)
+
+**Purpose.** Prove the architecture *can* memorise a single shape (rule out "insufficient capacity")
+before spending GPU on the grid. Capacity is monotone → test only the **smallest** cell (A); if it
+passes, every larger cell trivially has enough capacity.
+
+**Controlled conditions — FIXED parameters (and why):**
+
+| Param | Value | Why fixed |
+|---|---|---|
+| train mesh | 1 fixed (`sorted(paths)[0]` = an airplane), `max_meshes=1` | single-shape memorisation; deterministic pick |
+| model | cell A: 2048 latents, enc4/dec8, width 1024, 16 heads, latent_dim 64 | smallest cell = the monotone capacity floor |
+| `kl_weight` | 0 | pure capacity test, no regulariser |
+| `deterministic` | true (z=μ) | no sampling → σ never sampled → no σ-explosion even at kl=0 |
+| recon loss | plain MSE (`near_beta=0`) | no loss-engineering confound |
+| lr | 1e-4 | 1e-3 diverges on overfit; 1e-4 descends stably |
+| eval | μ-path (trained at z=μ), MC **res-256** | 256 exposes surface roughness that res-128 smooths over |
+| PASS bar | train RMS < 0.02 | = the near-band width; a pre-set principled bar, not a post-hoc threshold |
+
+**Varied parameters — what I OPENED, and what each revealed:**
+
+| Param | Swept | Finding |
+|---|---|---|
+| `fixed_seed` | 0 (frozen) → null (resample every epoch) | **Frozen = only 2048 query points are ever supervised → the SDF field wiggles freely between them → rough / ugly surface.** Resampling injects fresh near-surface points each epoch → densely pins the field → smooth. |
+| LR schedule | constant → cosine decay (1e-4→1e-6) | Constant-LR + resampling floors the loss at the SGD noise ball (the target now moves each epoch). Cosine decay settles it: loss 2.3e-4 → 1.4e-5, recovering the fidelity that resampling alone had cost. |
+| epochs | 3000 → 6000 → 12000 | More epochs only help *once the seed is unfrozen and LR decays*; more frozen-seed epochs only over-fit the 2048 points harder. |
+
+**Results (same ckpt lineage, eval res-256, μ-path):**
+
+| version | NC (smooth) | Chamfer | F-score@.02 | V-IoU | S-IoU | RMS | train loss |
+|---|---|---|---|---|---|---|---|
+| frozen seed, const-LR, 3k ep | 0.712 | 0.0124 | 0.993 | 87.0% | 83.6% | 0.0036 | ~0 |
+| unfrozen, const-LR, 6k ep | 0.860 | 0.0247 | 0.947 | 64.0% | 58.1% | 0.0119 | 2.3e-4 |
+| **unfrozen, cosine-LR, 12k ep** | **0.943** | **0.0087** | **1.000** | **92.3%** | **90.2%** | 0.0035 | **1.4e-5** |
+
+**Verdict: PASS.** The architecture memorises one mesh to F-score 1.00 / NC 0.94 / Chamfer 0.009 /
+S-IoU 90%, and the render matches by eye. Two levers set render quality: **(1) resample every epoch**
+(kills high-frequency roughness), **(2) cosine LR decay** (settles the resampled moving-target). Both
+are already ON by default in real 45k training (`train.fixed_seed:null`, cosine scheduler) — so the
+"ugly frozen overfit" is a protocol artifact, **not** what real training produces. **By monotonicity,
+capacity is sufficient for the whole 2×2 grid → Stage-2 is unblocked.**
+
+*S-IoU tops out ~90% (not higher) because it is thresholded sign in the near band — it saturates against
+MC resolution, exactly why near-sign was retired. The continuous arbiters (F-score 1.00, Chamfer 0.009,
+NC 0.94) are essentially maxed; they are the fidelity answer.*
+
+## Stage-2 plan — 2×2 capacity grid (num_latents × depth)
+
+Full 45k. One fixed protocol; vary only latent width × depth.
+
+| cell | num_latents | enc/dec | rand+imp pts | batch × accum |
 |---|---|---|---|---|
-| **A. Clamp** (§1) | Small model: low MSE but broken geometry (near-band sign ≈50%) | DeepSDF TSDF clamp ±0.1 | **Collapse** — clamp removes the far-field anchor → posterior collapse | Keep the anchor; up-weight near surface instead |
-| **B. Loss engineering** (§2–3) | MSE's surface gradient vanishes (∝ residual → 0 at the surface) | near-weighting → sign-BCE → sign-hinge | near-sign stuck ~52% for **every** loss / β / α | Maybe it isn't the loss at all |
-| **C. The funnel** (§4) | Is it loss / architecture / sampling-KL / capacity? | eliminate one at a time + single-mesh overfit | single mesh → **95%**, 45k → **53%** → capacity/generalisation | Vary capacity, not loss |
-| **D. Metric reframe** (§5b) | Is near-sign even the right target? | analyse what near-sign can physically resolve | it's a **saturating proxy** (below the RMS floor & MC resolution) | Judge by IoU / Chamfer / mesh |
-| **E. Capacity levers** (§5a, 5c) | Which capacity axis helps? | latent 2048→4096, depth 4/8→6/12, longer training | **all help** (IoU↑); loss does not | Go deeper + wider + longer |
+| A | 2048 | 4/8 | 1024+1024 | 4 × 8 |
+| B | 2048 | 6/12 | 1024+1024 | 2 × 16 |
+| C | 4096 | 4/8 | 2048+2048 | 2 × 16 |
+| D | 4096 | 6/12 | 2048+2048 | 1 × 32 |
 
-## ⚠️ Comparability of the numbers
+**Fixed across the grid:** eff-batch 32, `kl_weight=1e-4` (**per-dim mean-KL, kept deliberately** — 4096
+thus gets ~2× total budget, the intended "more dims = more capacity at a fixed per-dim rate"; stated, not
+a bug), plain MSE, cosine LR, fixed val set. **Eval:** sample-avg (K=32) primary **+** μ-path diagnostic
+(no `max` — the winner flips across cells). F-score τ=0.02 (> MC cell 2/128≈0.0156). Start 5 ep; check
+cell B 5-vs-7, then fix one epoch count for the whole grid.
 
-Epoch counts differ across experiments (3 / 7 / 10 ep), so **cross-row IoU is a trend, not a fair
-comparison.** The controlled, same-epoch pairs actually worth comparing:
+## Metrics (decided)
 
-- **Under-training?** — weighted β=100, same config: **3 ep IoU ~30% → 10 ep IoU 46%**. Loss keeps
-  falling with epochs yet near-sign stays flat → *not* under-training, structural.
-- **Latent width** — `cap_latent2048` vs `cap_latent4096`, both 3 ep, eff-batch 32: **27% vs 32.5%**
-  (4096 helps *when its posterior stays healthy* — fragile at kl=1e-4).
-- **Depth × latent fusion** — `cap_deep_latent4096` (enc6/dec12 + 4096, 7 ep) *running*; compares
-  against `cap_deepmse` (enc6/dec12 + 2048, 7 ep, IoU 45%) at matched depth & epochs.
+Chamfer-L1 + V-IoU + S-IoU + Normal-Consistency + F-score@0.02, all in `src/metrics/` with per-metric
+N/A fallback when a mesh is empty/uncomputable. Range / direction / scale anchor for each:
 
-Everything else (e.g. depth at 7 ep vs shallow at 10 ep) mixes epoch counts and is directional only.
+| metric | what it measures | range | good | anchor |
+|---|---|---|---|---|
+| **V-IoU** | occupancy IoU over **all** query points (global inside/outside, occ = sign(SDF)); a bare **"IoU"** in the timeline means V-IoU | 0–1 | higher | overfit ~0.92; 45k ~0.45 |
+| **S-IoU** | V-IoU restricted to the **near band** `\|gt\|<0.02` (surface region) | 0–1 | higher | overfit ~0.90 |
+| **Chamfer-L1** | mean nearest-neighbour surface distance (normalised coords ~[−1,1]) | ≥0 | lower | overfit ~0.009 |
+| **NC** | normal consistency = mean \|cos∠\| of matched surface normals | 0–1 | higher | overfit ~0.94 |
+| **F-score@0.02** | precision·recall of surface points within τ=0.02 | 0–1 | higher | overfit ~1.0 |
+
+- **S-IoU is a comparability number ONLY** — being thresholded sign, it saturates like near-sign; do NOT
+  gate on it.
+- **Chamfer / NC / F-score** are the *continuous* fine-surface arbiters (no sign floor) — they carry the
+  "is the surface actually learned" question.
+- **τ must exceed the MC cell size** `2/res` (≈0.0156 at res 128), else F-score scores agreement finer
+  than a vertex can be placed.
+- **Retired metrics** used earlier in the timeline: **near-sign-acc** = fraction of near-band points with
+  the correct *predicted sign* (saturates below the resolvable precision → dropped as a target); **RMS** =
+  √(mean SDF-error²), same units as `gt` (used as a training-health read; the PASS bar `RMS<0.02` = the
+  near-band width).
+
+## Timeline (condensed)
+
+| Date | What | Verdict |
+|---|---|---|
+| 2026-06 | Overfit 1 mesh, baseline VAE path | train loss→0.003; encode→KL→decode→SDF path wired correctly |
+| 07-03 | first_train OOM → halved heads, FPS query 4096→2048 | trains, but near-surface awful |
+| 07-05 | DeepSDF TSDF clamp ±0.1 | **collapse** — clamp removes the far-field anchor (the un-clamped far-field MSE that keeps the loss non-degenerate) → **posterior collapse** (decoder ignores the latent, KL→0). Keep the anchor. |
+| 07-06 | Near-surface weighting `1+λ·exp(−β|gt|)` (λ = near-surface up-weight, β = falloff rate) | IoU 5.6→25-30%; near-sign stuck ~52% for all β → structural, not under-training |
+| 07-06 | Sign-BCE `SignAwareSDFLoss` | self-check: ~380× stronger surface gradient (BCE steepest at the boundary, where MSE vanishes) |
+| 07-07 | Sign-hinge α-sweep + **isolation funnel** (= eliminate one hypothesis at a time — loss form, β, epochs, architecture, sampling — each with a matched control) | all losses ~52% → **not the loss**. Single-mesh overfit (near-sign-acc): deterministic z=μ **92%** / sampled VAE path **95%** → **not architecture, not sampling**. Isolated to **capacity / 45k generalisation**. |
+| 07-07/09 | Latent 2048 vs 4096 (3 ep) | 4096 helps when posterior healthy (32.5 vs 27.3%) but fragile at kl1e-4 |
+| 07-08 | Depth enc6/dec12 + metric reframe | IoU 27→38%; **depth is a real lever**. near-sign is a **saturating proxy** → switch target to IoU/Chamfer/mesh |
+| 07-09 | Deep + plain MSE, cosine vs const-LR | const-LR stalls (needs decay to settle); cosine 7ep IoU 45% |
+| 07-10/11 | Depth×latent (7 ep): 2048 vs 4096 @ kl{1e-4,1e-3} | **2048 (45.3%) beats 4096 (31.6 / 36.9%)** → latent width is not a lever |
+| 07-11/12 | 2048 long (20 ep) | μ-eval worsened (45→36) while sampled-val improved → *looked* like posterior drift… |
+| 07-12/13 | 2048 kl5e-4 ×2 seeds | μ-eval "broke" (45→5-7 on both seeds)… |
+| 07-13/14 | **Sample-avg eval probe (K=32)** | …both of the above were **decode(μ) artifacts, not model breaks** — sample-avg recovers 44/43. **4096<2048 survives** (~7 pt real). Root cause: decode(μ) has no ELBO term; in a ~1.3e5-dim latent the samples live on a shell of radius σ√d and μ is a near-zero-*mass* center the decoder never trains on (concentration of measure). Hunyuan/3DShape2VecSet decode a *sample*, not μ. |
+| **07-15** | **Capacity gate rebuilt (Stage-1 above)** | **PASS** — clean, logged, new metric suite. Grid unblocked. |
 
 ## Papers
 
-| Paper / Idea | Content |
-|------|--------------|
-| 3DShape2VecSet | VecSet representation | 
-| Dora | Sharp Edge Sampling |
-| Hunyuan3D-2 | A VAE-DiT 3D shape foundation model structure |
-| XCube | Sparse Voxel |
-| DeepSDF (CVPR 2019) | Clamped-L1 SDF loss, δ=0.1 truncation; **auto-decoder** (per-shape latent, no encoder/KL) |
-| Occupancy Networks (CVPR 2019) | Geometry as occupancy (inside/outside) via **BCE**; uniform sampling works best. Eval metrics: IoU / Chamfer-L1 / normal-consistency / F-score |
-| IGR / SIREN (2020) | **Eikonal** regularizer (‖∇f‖=1): a constraint a true SDF satisfies automatically, yet empirically crucial — the 3D precedent for a *redundant* auxiliary loss helping (see §5d) |
+| Paper | Contribution used |
+|---|---|
+| 3DShape2VecSet (SIGGRAPH 23) | VecSet representation; occupancy+BCE supervision; KL=1e-3, stated as being for the generative stage |
+| Hunyuan3D-2 / 2.1 | VAE-DiT structure; ShapeVAE = 4096 latents × 64, enc8/dec16, width 1024; `encode` defaults to `sample_posterior=True` (decodes a sample, not μ) |
+| Dora | Sharp-edge sampling |
+| DeepSDF (CVPR 19) | Clamped-L1 SDF loss δ=0.1; **auto-decoder** (per-shape latent, no encoder/KL → no collapse — why clamp is safe there but fatal in our encoder+KL VAE) |
+| Occupancy Networks (CVPR 19) | Occupancy via BCE; eval metrics IoU / Chamfer-L1 / NC / F-score |
+| IGR / SIREN | Eikonal regulariser — precedent for a redundant auxiliary loss helping (and sometimes destabilising) |
 
-## Experiments
+## Backlog / open questions
 
-| Date | Paper / Idea | Hypothesis | Change | Dataset | Ep | Result / Observation | Next step |
-|------|--------------|------------|--------|---------|----|----------------------|-----------|
-| 2026-06 | Hunyuan3D-2 ShapeVAE (baseline) | The hand-written VAE can fit a single mesh, confirming the encode→KL→decode→SDF path and loss are wired correctly | Overfit one mesh: `+experiment=overfit` (lr 1e-4, kl_weight 0, fixed_seed, bf16) | 1 mesh | ~69 | Train loss → ~0.003 by ~epoch 69. Reproduction path validated. | Move to a small multi-mesh set (`+experiment=first_train`); turn KL back on (γ≈1e-4) and watch recon vs. KL. |
-| 2026-07-03 | None | None | first_train caue OOM. Lower the self-attention layer head num to half of the original and reduce FPS query points from 4096 to 2048 (uniform 1024 + sharp edge 1024) | 3DShape2VecSet Watertight mesh dataset | ? | Training reconstruction loss → 0.00? and kl loss → 0.2. However, the result looks good but its awful near| |
-| 2026-07-05 | DeepSDF (TSDF clamp) | Clamping the far field to ±δ stops it dominating the MSE and focuses capacity near the surface | Clamp pred & gt to [−0.1, 0.1] before MSE (`clamp_val=0.1`) | small (~45k) | 27 | **Collapse from-scratch**: KL→1e-5, val loss flat 0.0083 ×27 ep, output RMS≈16, IoU 0%, marching cubes empty 4/4. See detailed §1 | Abandon clamp for from-scratch; keep far-field anchor |
-| 2026-07-06 | Near-surface weighting (own construction) | Up-weight near surface *without* removing the far-field anchor that clamp destroyed | `w = 1 + λ·exp(−β·\|gt\|)`, loss Σ(w·se)/Σw; β∈{30,60,100}, λ=4 | small, 16 val | 3→10 | IoU 5.65%→**25–30%** (β=100 best); **near sign-acc stuck ~52%** for all β. 10-ep follow-up: loss 5× lower, IoU 46%, but near sign-acc only 53.5% → **structural, not under-training**. See §2 | Sign-decoupled loss (§3) |
-| 2026-07-06 | Occupancy Nets / 3DShape2VecSet (sign decouple) | A BCE sign term supplies the non-vanishing surface gradient MSE lacks | `SignAwareSDFLoss = weighted-MSE + α·BCE(−k·pred, gt<0)`, same head; α,k Hydra-tunable | small (staged) | — | Self-check: **~380× stronger gradient** at a surface sign-error vs weighted-MSE; not yet trained. See §3 | Run `4_sign_aware`, sweep α∈{.03,.1,.3}, k∈{10,30,100} |
-| 2026-07-07 | Sign-hinge (own) + isolation diagnostics | Is the stuck near sign-acc the loss, the architecture, sampling/KL, or capacity? | `SignHingeSDFLoss` α-sweep {0.1,0.5}; then single-mesh overfit (deterministic & real VAE path) | small + 1-mesh | 3 / 1 / 8k-st | hinge near sign flat ~52% across α → **not loss**. Single-mesh overfit: deterministic **92%**, real VAE path (σ≈1) **95%** → **not architecture, not sampling/KL**. Isolated to **capacity/generalization to 45k**. See §4 | Capacity experiment: num_latents 2048 vs 4096 (`6_cap2048` / `7_cap4096`) |
-| 2026-07-07/08 | Capacity — latent width | Does doubling `num_latents` help? | `6_cap2048` vs `7_cap4096`, eff-batch 32 | small 45k | 3 | 2048: IoU 27%. 4096 **run 1**: μ-path eval broken (σ→5, posterior pathological, MSE 0.11, IoU 14). **Rerun (identical config, 07-09)**: posterior healthy, μ-MSE 0.00227, **IoU 32% > 2048's 27%**. ⚠️ Same config → one pathological, one healthy: 4096 helps *when stable* but is fragile at kl=1e-4. See §5a | Free-bits to stabilise 4096; depth |
-| 2026-07-08 | Depth (enc6/dec12) + metric reframe | Is it network depth? Is near-sign even the right target? | `8_cap_6_12_layers` | small 45k | 3→7 | 3 ep stalled at val 0.013 (short cosine killed LR); 7 ep trains fine (val→0.0016). **IoU 27%→38%** (depth is a real lever) while near-sign flat ~54% → near-sign is a **saturating proxy**, IoU/mesh is the target. viz: both meshes coarse, depth smoother/less fragmented. See §5 | Deeper+longer; judge by IoU/Chamfer/viz |
-| 2026-07-09 | Deep + plain MSE, scheduler on/off | Does constant LR (no scheduler) help the deep net with the simplest loss? | `9_deep_mse_nosched` (const LR) vs `10_deep_mse` (cosine) | small 45k | 5 / 7 | const-LR **stalls** (val ~0.03 flat/rising — can't settle without decay). `10_deep_mse` (cosine, 7 ep): **IoU 45%** at enc6/dec12+2048. See §5c | Fuse depth+4096 (`cap_deep_latent4096`, running) |
-
-## Deep dive — why each step happened (§1–5)
-
-The supporting detail behind the Arc: *why* each thing was tried and what it proved, with citations.
-The Arc table up top is the map; this is the terrain. Format per step:
-**Motivation / Decision / Result / Why / References** (which paper, in which scenario, used which
-method to solve what — and, honestly, where we have no citation).
-
-### §1. Small baseline → TSDF clamp (2026-07-02/03)
-
-**Motivation.** The small unclamped baseline (ckpt `2026-07-02/23-03-26`) had low MSE but broken
-geometry: near-band (|gt|<0.02) sign-accuracy ≈50% (coin flip), occupancy IoU 5.65%, fragmented
-marching cubes. A swap test ruled out posterior collapse (the latent *was* being used). Diagnosis:
-the MSE gradient is `2·(pred−gt)`, so near the surface where gt≈0 the residual — and thus the
-gradient — is weakest exactly where geometry matters. Capacity flows to the easy far field and the
-surface is neglected ("loss low, quality bad").
-
-**Decision.** Adopt DeepSDF-style TSDF clamping: clamp both prediction and target to [−0.1, 0.1]
-before the MSE, so the far field can no longer dominate the loss.
-
-**Result.** Collapse from-scratch — posterior collapse, dead-flat val, exploded output, empty mesh
-(numbers in the table row).
-
-**Why.** Clamping removes the far-field *directional anchor*. With both pred and gt clamped to δ in
-the far field, the loss there is flat (zero gradient) for any pred ≥ δ — so an unbounded constant
-field minimises the loss and the latent becomes unnecessary → collapse.
-
-**References.**
-- **DeepSDF** (CVPR 2019) — introduces the clamped-L1 SDF loss with truncation δ=0.1
-  (unit-sphere-normalised) to focus capacity near the surface. *Crucial scenario difference*:
-  DeepSDF is an **auto-decoder** (a per-shape latent optimised directly, no encoder, no KL), so it
-  never faces posterior collapse. The same truncation that is safe there is fatal in our
-  encoder+KL VAE. **Same method, different regime, opposite outcome.**
-- **TSDF** truncation originates in volumetric range-image fusion (Curless & Levoy, SIGGRAPH 1996;
-  KinectFusion, 2011) — a fusion/denoising trick, never intended as a from-scratch training loss.
-
-### §2. Clamp → near-surface weighting (2026-07-06)
-
-**Motivation.** Keep the near-surface emphasis clamp aimed for, but *without* removing the
-far-field anchor whose flat loss caused collapse.
-
-**Decision.** Additive-floor weighting `w = 1 + λ·exp(−β·|gt|)`, loss = Σ(w·(pred−gt)²)/Σw. The far
-field keeps w→1 (a normal MSE anchor); the near surface is up-weighted to 1+λ. Normalisation makes
-β=0 collapse to plain MSE (clean toggle). λ=4, β swept {30,60,100}. Refactored the loss into
-swappable Hydra classes (Weighted / Clamped).
-
-**Result (table has the IoU/near-sign numbers).** New signal beyond the table: the **mid** band
-(0.02–0.1) crossed the all-zeros baseline for the first time (a band actually "learned"), but the
-**near** band stayed *worse* than outputting zero even after the 10-epoch follow-up drove val loss
-5× lower. **Verdict: not under-training — structural.** Minimising this loss further does not resolve
-the surface sign; loss and target metric (near sign-acc) are decoupled, exactly as the
-vanishing-gradient argument predicts. Green light for §3.
-
-**Why.** Weighting helped the **mid** band, where residuals are non-zero so a gradient exists →
-better global inside/outside → higher IoU. It cannot help the **near shell**: the gradient is
-`2·w·(pred−gt)`, and at the surface (pred−gt)→0, so `w × (≈0) = ≈0`. Weighting *multiplies* a
-vanishing gradient; it cannot create one. Sweeping β 3.3× with zero movement in near sign-accuracy
-is the empirical confirmation.
-
-**References.**
-- **Honest status: none of the SDF/occupancy papers surveyed use per-point distance weighting.**
-  DeepSDF, **Occupancy Networks** (CVPR 2019), and **3DShape2VecSet** (SIGGRAPH 2023) all balance
-  near/far via **sampling density**, not loss reweighting (OccNet reports uniform sampling best;
-  DeepSDF samples aggressively near the surface).
-- `exp(−β·|·|)` is a generic RBF/Gaussian-kernel falloff, not from a specific 3D paper. β was
-  chosen by matching the weight's effective reach (~3/β) to DeepSDF's δ=0.1 → β≈30, up to 100 to
-  match our data's near-surface scale (median |sdf|≈0.016, 57% of points within |sdf|<0.02).
-- **Correction:** an earlier note mis-attributed exponential distance weighting to *Pixel2ISDF*;
-  the original uses truncated L2 + image/eikonal supervision and has no such term. No citation
-  supports this weighting — it is our own construction.
-
-### §3. Weighting → sign-decoupled loss `SignAwareSDFLoss` (2026-07-06, staged)
-
-**Motivation.** Since weighting cannot manufacture a surface gradient under MSE, attack the root
-cause directly. Precise framing: MSE does not "ignore" sign, but its sign penalty ∝ magnitude, so
-it vanishes at the surface (where magnitudes →0) — exactly where sign matters. Decouple the sign
-into a classification whose gradient is *maximal* at the boundary.
-
-**Decision.** `SignAwareSDFLoss = weighted-MSE + α·BCE(logit = −k·pred, target = [gt<0])`. Reuse
-the same SDF head: reinterpret its output as an occupancy logit (inside = sdf<0). α (`sign_weight`)
-balances sign vs distance; k (`sign_temp`) is the sigmoid temperature. Both Hydra-tunable; α=0
-reduces to the weighted loss. Single head — the minimal decoupling, no second head yet.
-
-**Result.** Not yet trained; self-check confirms the restored surface gradient (~380×, see table).
-Success criterion for `4_sign_aware` = near sign-accuracy leaving ~52% (target >65%).
-
-**Why.** A logistic-classification loss has its steepest gradient at the decision boundary (the
-surface) — the complement of MSE's weakness. k sets the band where the sign gradient is
-non-saturated (~3/k, the same length-scale role β played; too-large k saturates the sigmoid
-off-surface and starves it). α sets its magnitude relative to the distance term. Taken to the limit
-(α→∞, drop distance) this *is* occupancy + BCE — so the decoupling **re-derives 3DShape2VecSet's
-original objective**, here added onto distance regression as the smallest single-head version.
-
-**References.**
-- **Occupancy Networks** (CVPR 2019) — models geometry as occupancy trained with **BCE**; the
-  direct precedent for a "sign head" with a non-vanishing boundary gradient.
-- **3DShape2VecSet** (SIGGRAPH 2023) — the representation this project reproduces; its original
-  supervision is **occupancy + BCE**. The decoupling, at its limit, recovers exactly this —
-  evidence the instinct converges on the field's established choice, not a novel gamble.
-- **DeepSDF** (CVPR 2019) — used **L1** (not L2) for SDF regression; L1's gradient is sign(residual),
-  constant magnitude, i.e. non-vanishing at the surface. Precedent that keeping a live near-surface
-  gradient matters. (An L1 variant is the cheaper fallback if BCE proves unstable.)
-- The weighted-MSE + BCE **hybrid itself is our own construction**; only its BCE component is the
-  OccNet / 3DShape2VecSet objective.
-
-### §4. Isolating the near-sign-acc bottleneck — a narrowing funnel (2026-07-07)
-
-After §1–3, near-band sign-accuracy was stuck at ~52% (coin flip) no matter the loss. This day
-was spent **eliminating hypotheses one at a time**, each test with a control. Two diagnostics were
-themselves confounded and only caught by adding a control — logged honestly below.
-
-**The funnel** (each row kills one hypothesis):
-
-| # | Test | Question | Result | Eliminated |
-|---|------|----------|--------|-----------|
-| 1 | weighted β-sweep {30,60,100}, 3 ep | Is it β? | near sign ~52% for all | not β |
-| 2 | weighted 10-epoch | Under-training? | loss 5× lower, IoU 46%, near sign 53.5% | not under-training |
-| 3 | *diag (batch 2, no accum)* | Why is BCE unstable? | "BCE inflates pred" | ⚠️ confounded |
-| 4 | **control: weighted in same diag** | Really BCE? | weighted bounces identically → diag invalid | retract "BCE unstable" |
-| 5 | hinge 1-ep real runner vs weighted first 30 steps | Is hinge unstable? | step-for-step identical → early spike is a normal fresh-model MSE transient | retract the whole "instability" story |
-| 6 | hinge α-sweep {0.1, 0.5} 3 ep | Does more sign weight help? | near sign 52.0 / 52.3, flat | not α, not the sign-loss form |
-| — | synthesis | | clamp/weighted/BCE/hinge × β × α × epoch all ~52% | **not the loss** |
-| 7 | *single-mesh overfit, KL=0 sampled* | Can the architecture do it? | σ exploded to 120 (no KL to regularise) | ⚠️ confounded |
-| 8 | **single-mesh overfit, deterministic (z=μ)** | Pure architectural capacity? | near sign climbs to **92%** as near-RMS→0.0033 (< |gt| median 0.0071) | not architecture, not loss |
-| 9 | **single-mesh, real VAE path (sampled z + kl=1e-4), 8k steps** | Sampling/KL vs generalisation? | σ≈1 (KL healthy), near sign → **95%** | not sampling/KL |
-
-**Conclusion.** The architecture + weighted-MSE **can** resolve near-surface sign — 92% deterministic,
-95% with the full stochastic VAE path — but only when memorising **one** mesh. On the 45k-mesh train
-set the same model sits at 53%. The bottleneck is therefore **capacity / generalisation to 45k
-shapes through a small latent set**, not the loss, not the architecture's expressive power, not the
-VAE sampling. The entire §1–3 loss line was treating the wrong disease.
-
-**Method notes (honest).**
-- **RMS, not MSE, is the yardstick.** RMS = √(mean err²) is in SDF units, so it compares directly to
-  |gt|. Near-surface signs are recoverable exactly when near-RMS < |gt| (0.0033 < 0.0071 → 92%).
-- **The σ explosion (test 7) was self-inflicted:** with `kl_weight=0` there is no term pulling σ
-  toward the prior, and on a single mesh the decoder memorises f(query)→sdf and ignores the latent,
-  so σ drifts unbounded (→120). With KL on (test 9) σ stays ≈1. KL works; it was switched off.
-- **Two confounded diagnostics (3, 7)** were only exposed by adding a control (4, 8/9). Lesson: every
-  quick diagnostic needs a control run, or its small-batch / no-KL setup can fake the effect.
-
-**Next.** Capacity experiment (`6_cap2048` vs `7_cap4096`) — vary only `num_latents`; see §5.
-
-### §5. Capacity, the metric reframe, and depth (2026-07-07 → 07-09)
-
-§4 isolated the bottleneck to "capacity / generalisation to 45k". This section acts on that — and
-in doing so corrects the *target metric* we had been optimising.
-
-**5a. Latent width (2048 vs 4096) — and a μ-eval pitfall.**
-Doubling `num_latents` (with coupled sampling; eff-batch held at 32) barely moved near-sign
-(54.8% → 56.6%, sample-path). **Run 1** of `7_cap4096` looked terrible in eval_recon (MSE 0.11,
-IoU 14%) while its *training* val loss was fine (0.0015). Cause: eval_recon uses the posterior mean
-**μ** (deterministic, reproducible — the correct choice), but that run's posterior was
-**pathological** (σ up to 5, vs 2048's 1.5), so μ fell off the learned manifold (μ-path MSE 0.16 vs
-sample-path 0.0009). **μ-eval didn't fail — it correctly exposed a sick posterior.**
-
-**Rerun overturns the "weak lever" verdict (2026-07-09).** Re-ran `7_cap4096` with the *identical*
-config (kl=1e-4, eff-batch 32, 3 ep) → this time the posterior was **healthy**: μ-path MSE 0.00227
-(not 0.11), val 0.0085→0.0026→0.0023, and **IoU 32.5%, clearly above 2048's 27.3%** (lower MSE too,
-0.00227 vs 0.00323). So doubling latents **does help** — the earlier "barely moves / weak lever"
-call was an artefact of run 1's broken posterior, not the real 4096 capacity. **The catch is
-stability**: the *same* config produced a pathological posterior once and a healthy one once, so
-4096 at kl=1e-4 is **fragile** (pathology is a stochastic risk, not an inevitability). Fix is
-free-bits / stronger KL so μ reliably reconstructs — then 4096's capacity gain is dependable.
-
-**5b. The metric reframe — near-sign-acc is a saturating proxy.**
-Key realisation (user-driven): **high near-surface sign-acc is not a necessary condition for good
-reconstruction.** Sign-acc is a thresholded view of near-RMS, and it saturates at the surface:
-- For points with |gt| < achievable RMS, the sign is a coin flip *regardless of model quality*
-  (you cannot get the sign of a point whose true value is below your precision floor). With median
-  near |gt|≈0.007, even a good fit (RMS 0.007) tops out around ~75% near-sign, never 100%.
-- Marching cubes at res 128 has cell size 2/128 ≈ 0.016, so any surface displacement below that is
-  **not even extractable** — pushing near-sign from 75%→95% (RMS 0.007→0.003) optimises something
-  below the extraction resolution.
-So near-sign was a *useful diagnostic* (it drove the whole §1–4 narrowing) but the **wrong target**.
-The right target is actual mesh geometry: **IoU / Chamfer / normal-consistency / eyeballing the
-mesh** (`viz_recon`). Built `src/metrics/` for this — `OccupancyIoU`, `ChamferDistance` (scipy
-cKDTree, points→scalar), and `diagnose/BandedSDFMetrics`.
-
-**Sign-acc was dropped entirely (2026-07-10).** Even as a diagnostic it is less defensible than a
-continuous error read: it saturates below the RMS floor / MC resolution (the same reason it failed
-as a target). It is replaced by **banded RMS** in `BandedSDFMetrics` — per-band `rms` plus
-`rms_ratio = band-RMS / predict-all-0 RMS` (ratio <1 = the band beats predicting zero, ≈1 = learned
-nothing, >1 = worse than zero). This localises *which* band is failing (near/mid/far), which the
-aggregate IoU/Chamfer can't. Division of labour: **IoU / Chamfer / mesh = the target**; **banded RMS
-= the training-health diagnostic**. (Caveat that keeps it honest: low banded RMS is necessary, not
-sufficient — the whole saga began from "MSE low, geometry broken", so the mesh stays the arbiter.)
-
-**Consequence for loss design.** The whole line that tried to *manufacture* the sign (BCE §3, hinge
-§5d, sign-motivated weighting §2) was engineering a proxy. This does **not** mean those losses are
-worthless — only that near-sign was the wrong lens to judge them; their real question (do they
-improve **IoU/mesh**?) was never actually measured (§5d). Going forward, judge any loss/capacity
-change by mesh geometry, with banded RMS to localise the failing band.
-
-**5c. Depth (enc6/dec12) — the real lever, but the LR schedule matters.**
-Deeper net (enc6/dec12, up from small's 4/8), num_latents fixed 2048. 3-epoch run **stalled** at
-val 0.013 (flat from epoch 0) — but this was **not** a depth failure: the 3-epoch cosine decayed
-the LR to ~0 before the deeper net got going. The 7-epoch run (cosine re-matched) **trains fine**
-(val 0.0134→0.0016, comparable to the shallow model). By the *right* metric it clearly helps:
-**IoU 27% → 38%**, while near-sign stays flat ~54% — exactly the reframe of 5b (IoU moves, the
-saturating near-sign doesn't). `viz_recon` on a fine-grid shelf: both models lose the grid detail
-(coarse blobby slab), but the deeper one is smoother/more complete, the shallow one noisier and
-fragmented — visually consistent with IoU 38% vs 27%. Both are still poor, so there is real
-headroom; the direction is more capacity + longer training (not more loss engineering). *(Const-LR
-variant `9_deep_mse_nosched` stalls — without decay the model can't settle; the scheduler helps.)*
-
-**5d. Redundant/auxiliary losses — open question with precedent.**
-The sign hinge is *informationally* redundant (sign is derivable from SDF), but a redundant signal
-can still reshape the gradient field / reprioritise scarce capacity toward the surface. Precedent:
-deep supervision / auxiliary losses (Deeply-Supervised Nets), and — directly in 3D — the **Eikonal
-loss** (IGR/SIREN), a constraint a true SDF satisfies automatically yet which is empirically crucial
-for neural-SDF quality (and which can also *destabilise*, cf. NeurIPS'23). Honest gap: we dismissed
-hinge by **near-sign** (the wrong, saturating metric); its effect on **IoU/mesh** was never
-measured. A clean re-test would be hinge vs plain MSE on the same deep net, judged by IoU + viz.
-
-**Ops notes (learned the hard way).**
-- **Long training runs need `setsid nohup` detachment**, not the Bash tool's `run_in_background` —
-  the latter killed 7-epoch runs at ~2 min / epoch-0 twice (clean external SIGKILL, no error).
-- **Blackwell (RTX 5080) GPU hangs** (`cudaErrorLaunchTimeout`) crash long runs randomly even at
-  `-pl 300`; save per-epoch checkpoints so a late crash still leaves a usable ckpt.
-
-## Papers to read / backlog
-
-- _(add candidate papers and the specific idea each might contribute)_
-
-## Method ideas / open questions
-
-- KL weight schedule: fixed small γ vs. warmup — effect on reconstruction sharpness.
-- Free-bits for larger latents (§5a).
-- Re-test redundant/auxiliary losses by IoU/mesh, not near-sign (§5d).
-- Push the confirmed lever: deeper + longer training (§5c).
-- Augmentation: rotation/jitter at the light preprocessing stage (SDF is equivariant to rigid
-  rotation) — does it help generalization on a small dataset?
-- _(running list of inspirations to validate once the baseline is solid)_
+- **Run Stage-2 grid**: cell B @ 5 ep first → fix 5-vs-7 → then all four cells.
+- Push depth on 2048 (enc8/dec16) once the grid confirms depth as the lever.
+- Re-test auxiliary/redundant losses (sign-hinge, eikonal) by **IoU/mesh**, not near-sign — their real
+  effect was never measured (only the wrong metric was).
+- KL knob: free-bits vs warmup vs fixed `kl_weight` — effect on μ-usability and recon sharpness (KL is reopened as
+  a usable knob, not a break-cause).
+- Augmentation (rotation/jitter; SDF is rigid-equivariant) — does it help small-data generalisation?

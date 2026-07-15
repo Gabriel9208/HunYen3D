@@ -1,0 +1,54 @@
+# @package _global_
+# Reseed rerun of cap_deepmse_kl5e4 (deep+2048, kl=5e-4, 7ep), trainer.seed 42->123.
+# Run 1 landed in a broken-μ basin (μ-eval 0.037, IoU 5.5%, near ratio 19) despite a *mild* posterior
+# (per-elem KL 0.063, σ not blown up) — looks like the §5a coin-flip, not a σ-blowup. This rerun tests
+# whether it's the seed/draw or the KL value: healthy here => coin-flip, §5f hypothesis survives;
+# broken again => kl=5e-4 genuinely unstable, move to free-bits.
+defaults:
+  - override /model: shape_vae
+  - override /task: vae
+  - override /loss@task.recon_loss: weighted   # WeightedSDFLoss; near_beta=0 below makes it plain MSE
+  - override /data: shape_vae
+
+model:
+  num_latents: 2048
+  num_encoder_layers: 6      # small=4
+  num_decoder_layers: 12     # small=8
+
+preprocess:
+  random_sample_count: 1024
+  important_sample_count: 1024
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 5e-4
+  recon_loss:
+    near_beta: 0             # degenerates WeightedSDFLoss to plain unweighted MSE
+
+trainer:
+  seed: 123                  # run 1 used the default 42; reseed to test the coin-flip
+  val_interval: 1
+  amp: true
+  grad_accum_steps: 16       # batch 2 × 16 = effective 32
+  resume: null
+
+data:
+  batch_size: 2              # enc6/dec12 OOMs at batch 4 (smoke-tested)
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: cap_deepmse_kl5e4_seed2
+  tags: []
+  mode: online
+  id: null
+  resume: allow

@@ -1,0 +1,46 @@
+# @package _global_
+# Stage-2 generalisation grid: train a capacity cell on the full 45k. Plain unweighted MSE
+# (near_beta=0), kl 1e-4, 5 epochs (adaptive → bump to 7 for the whole grid if cell B looks under-trained).
+# Pick the cell at launch:  +experiment=grid_train capacity=A_lat2048_l4_8   (default = B).
+# Eval afterwards with scripts/evaluate.py (sample-avg primary + mu logged = best-of-both).
+defaults:
+  # model/task/loss(weighted)/data are already selected in config.yaml; here we only add the capacity cell
+  # (sets model latents/layers, preprocess sample counts, batch/accum) and layer this file's body on top.
+  - /capacity: B_lat2048_l6_12                 # override at CLI: capacity=<cell>
+  - _self_
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0             # degenerate WeightedSDFLoss → plain unweighted MSE
+
+trainer:
+  val_interval: 1
+  amp: true
+  resume: null
+  max_epochs: 5
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: grid_train_${hydra:runtime.choices.capacity}
+  tags: [grid, train]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/grid_train/${hydra:runtime.choices.capacity}/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,3 +1,4 @@
 _target_: src.engine.task.VAETask
 kl_weight: 1.0e-3
+deterministic: false   # true → train on z=μ (no sampling); used by grid_overfit's pure-capacity gate
 # recon_loss is injected by the loss config group (see config.yaml defaults); defaults to weighted
