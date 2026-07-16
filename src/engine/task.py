@@ -7,6 +7,11 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from src.metrics.iou import SIOU, VIOU
+
+# Stateless + cheap (sign compare on the SDF already in hand, no MC/KDTree) → log every step.
+_VIOU, _SIOU = VIOU(), SIOU()
+
 
 @dataclass
 class StepOutput:
@@ -167,11 +172,15 @@ class VAETask(BaseTask):
 
         loss = recon_loss + self.kl_weight * kl.mean()
 
+        gt_sdf = batch["gt_sdf"]
         return StepOutput(
             loss=loss,
             metrics={
                 "recon": recon_loss.item(),
-                "kl": kl.mean().item()
+                "kl": kl.mean().item(),
+                # sign-IoU on the query points, as percentages; near-free (no MC).
+                "viou": _VIOU(pred_sdf, gt_sdf) * 100,
+                "siou": _SIOU(pred_sdf, gt_sdf) * 100,
             }
         )
 

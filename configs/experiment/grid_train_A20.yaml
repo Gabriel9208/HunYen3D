@@ -1,0 +1,45 @@
+# @package _global_
+# Epoch-budget pilot: cell A on the full 45k for 20 epochs (cosine 3e-4→1e-6 over the whole 20 —
+# NOT a resume of the 5-epoch run; the cosine budget is baked in, so this is a fresh schedule).
+# Purpose: read val/S-IoU per epoch to find the plateau → is the 5ep 43% IoU undertraining or a
+# capacity ceiling, and what epoch budget should B/C/D use. Stop early once the val curve flattens.
+# Launch:  +experiment=grid_train_A20
+defaults:
+  - /capacity: A_lat2048_l4_8                  # smallest cell; the cheapest place to pin the epoch axis
+  - _self_
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0             # plain unweighted MSE (same loss as grid_train, only epochs change)
+
+trainer:
+  val_interval: 1            # val (incl. viou/siou) every epoch → watch the curve live
+  amp: true
+  resume: null
+  max_epochs: 20             # cosine T_max auto-aligns to 20 epochs
+
+data:
+  train:
+    dataset:
+      fixed_seed: null       # resample query points each epoch (no duplicate sampling)
+  val:
+    dataset:
+      fixed_seed: 0          # frozen val for a comparable per-epoch metric
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: grid_train_A20
+  tags: [grid, train, epoch-pilot]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/grid_train_A20/${now:%Y-%m-%d_%H-%M-%S}

@@ -107,8 +107,36 @@ def _viz_setup(cfg: DictConfig, ds):
                            save_pair=save_pair, sample_pn=sample_pn)
 
 
+def _preflight(cfg: DictConfig) -> None:
+    """Validate the error-prone args up front so a bad path/number fails in seconds,
+    not after minutes of eval. Also resolves a relative +ckpt against the original cwd
+    (hydra chdirs into the run dir, which silently breaks bare relative paths)."""
+    from hydra.utils import get_original_cwd
+
+    if "ckpt" not in cfg:
+        raise SystemExit("missing +ckpt=<path to a .pt checkpoint>")
+    ckpt = cfg.ckpt if os.path.isabs(cfg.ckpt) else os.path.join(get_original_cwd(), cfg.ckpt)
+    if not os.path.isfile(ckpt):
+        raise SystemExit(f"ckpt not found: {ckpt}")
+    cfg.ckpt = ckpt  # write back the resolved absolute path so torch.load below just works
+
+    obj_root = cfg.data.val.dataset.obj_root
+    if not os.path.isdir(obj_root):
+        raise SystemExit(f"val obj_root not found: {obj_root}")
+
+    shapes, samples = int(cfg.get("shapes", 16)), int(cfg.get("samples", 0))
+    resolution, fscore_tau = int(cfg.get("resolution", 128)), float(cfg.get("fscore_tau", 0.02))
+    if shapes <= 0 or samples < 0 or resolution <= 0 or fscore_tau <= 0:
+        raise SystemExit(f"bad numeric arg: shapes={shapes} samples={samples} "
+                         f"resolution={resolution} fscore_tau={fscore_tau}")
+    if bool(cfg.get("viz", False)) and fscore_tau <= 2 / resolution:
+        raise SystemExit(f"fscore_tau={fscore_tau} must exceed MC cell size 2/{resolution}"
+                         f"={2 / resolution:.4f}, else it scores below discretisation noise")
+
+
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
+    _preflight(cfg)  # fail fast on bad ckpt/paths/args before any heavy work
     set_seed(0)
     device = get_device(cfg.trainer.get("device", "auto"))
     model = instantiate(cfg.model).to(device).eval()
