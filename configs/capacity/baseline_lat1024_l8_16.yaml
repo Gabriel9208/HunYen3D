@@ -1,0 +1,16 @@
+# @package _global_
+# THE research VAE baseline: 1024 tokens + enc8/dec16 — the Hunyuan3D-2 reconstruction config ("few
+# tokens, deep"). Replaces the 2×2 capacity grid: matching the reference depth directly removes the
+# shallow-vs-deep comparison, leaving a single reference-aligned baseline.
+# random+important sample counts must sum to num_latents (they set the encoder FPS-query length).
+model:
+  num_latents: 1024
+  num_encoder_layers: 8
+  num_decoder_layers: 16
+preprocess:
+  random_sample_count: 512
+  important_sample_count: 512
+data:
+  batch_size: 2
+trainer:
+  grad_accum_steps: 16     # 2 × 16 = effective 32 (conservative for the deep dec16; bump batch if VRAM allows)
