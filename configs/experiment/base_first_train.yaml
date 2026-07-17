@@ -4,6 +4,9 @@ defaults:
   - override /task: vae
   - override /data: shape_vae
 
+preprocess:
+  downsample_ratio: 2   # historical: inherited default random=2048, old fixed KV=4096 → ratio 2 (NOT the 20 default)
+
 optimizer:
   lr: 3e-4
   weight_decay: 0

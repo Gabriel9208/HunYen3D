@@ -14,6 +14,7 @@ model:
 preprocess:
   random_sample_count: 1024      # + important = 2048 = num_latents
   important_sample_count: 1024
+  downsample_ratio: 4   # historical: old fixed KV=4096 per branch = ratio 4 x 1024 (NOT the 20 default)
 
 optimizer:
   lr: 3e-4

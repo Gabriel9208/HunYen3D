@@ -23,6 +23,7 @@ preprocess:              # layered on top of default, only shrink sample counts 
   num_surface_samples: 20000
   n_query_surface: 2000
   n_query_uniform: 500
+  downsample_ratio: 2    # historical: inherited default random=2048, old fixed KV=4096 → ratio 2
 
 data:                    # obj_root/cache_dir/mode come from data/shape_vae.yaml; here we only freeze sampling
   train:

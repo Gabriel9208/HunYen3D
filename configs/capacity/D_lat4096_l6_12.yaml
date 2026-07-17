@@ -7,6 +7,7 @@ model:
 preprocess:
   random_sample_count: 2048
   important_sample_count: 2048
+  downsample_ratio: 2   # historical: old fixed KV=4096 per branch = ratio 2 x 2048 (NOT the 20 default)
 data:
   batch_size: 1
 trainer:

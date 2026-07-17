@@ -274,7 +274,7 @@ class Preprocessor(nn.Module):
         include_pi: bool = True,       # whether Fourier frequencies are multiplied by π (official vae-v2-1 uses false)
         random_sample_count: int = 4096,
         important_sample_count: int = 2048,
-        down_sample_count: int = 4096,
+        downsample_ratio: int = 20,    # KV points per branch = downsample_ratio * that branch's query count (Hunyuan derive)
         num_surface_samples: int = 249856,
         n_query_surface: int = 200_000,
         n_query_uniform: int = 50_000,
@@ -289,7 +289,7 @@ class Preprocessor(nn.Module):
         self.include_pi = include_pi
         self.random_sample_count = random_sample_count
         self.important_sample_count = important_sample_count
-        self.down_sample_count = down_sample_count
+        self.downsample_ratio = downsample_ratio
         self.num_surface_samples = num_surface_samples
         self.n_query_surface = n_query_surface
         self.n_query_uniform = n_query_uniform
@@ -317,7 +317,7 @@ class Preprocessor(nn.Module):
     @property
     def cache_signature(self) -> dict:
         # Only the heavy params that affect the big pool / SDF bank contents; changing light params
-        # (down/random/important/pe/sdf_subset) does not require rebuilding the cache.
+        # (downsample_ratio/random/important/pe/sdf_subset) does not require rebuilding the cache.
         return {
             "num_surface_samples": self.num_surface_samples,
             "n_query_surface": self.n_query_surface,
@@ -354,13 +354,16 @@ class Preprocessor(nn.Module):
 
     # ---- light: every epoch ----
     def sample(self, cache: dict):
-        surf = self.mesh2query.downsample(cache["surface_pool"], self.down_sample_count)
-        sharp = self.mesh2query.downsample(cache["sharp_pool"], self.down_sample_count)
+        # KV (data) = downsample_ratio * query, per branch — mirrors Hunyuan's derive so the ratio stays
+        # fixed instead of drifting with num_latents. ponytail: downsample() caps at pool size, so keep
+        # downsample_ratio * max(random, important) <= num_surface_samples (else the ratio silently drops).
+        surf = self.mesh2query.downsample(cache["surface_pool"], self.downsample_ratio * self.random_sample_count)
+        sharp = self.mesh2query.downsample(cache["sharp_pool"], self.downsample_ratio * self.important_sample_count)
         surf_fps = self.mesh2query.fps(surf, self.random_sample_count)
         sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
 
-        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important, 7)
-        data = torch.cat([surf, sharp], dim=0)            # (2 * down_sample_count, 7)
+        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important = num_latents, 7)
+        data = torch.cat([surf, sharp], dim=0)            # (downsample_ratio * (random + important), 7)
 
         qp = cache["sdf_query_points"]
         gt = cache["gt_sdf"]

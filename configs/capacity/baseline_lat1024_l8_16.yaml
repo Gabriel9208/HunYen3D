@@ -10,6 +10,7 @@ model:
 preprocess:
   random_sample_count: 512
   important_sample_count: 512
+  downsample_ratio: 20     # Hunyuan-correct (KV/branch = 20×512 = 10240); archived cells pin their historical ratio, this baseline is the fixed one
 data:
   batch_size: 2
 trainer:

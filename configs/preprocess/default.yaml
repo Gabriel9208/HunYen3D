@@ -9,7 +9,7 @@ include_input: true
 include_pi: true            # multiply Fourier frequencies by π (official vae-v2-1 uses false; deliberately true here)
 random_sample_count: 2048   # FPS query points from random surface samples
 important_sample_count: 2048 # FPS query points from sharp edges
-down_sample_count: 4096     # surface (KV/data) points kept per branch
+downsample_ratio: 20        # KV/data per branch = downsample_ratio * {random,important}_sample_count (Hunyuan uses 20)
 num_surface_samples: 81920 # dense surface samples before downsampling
 n_query_surface: 200000     # SDF bank: near-surface sample count (offline once, can be large)
 n_query_uniform: 50000      # SDF bank: uniform-over-volume sample count (offline once, can be large)
