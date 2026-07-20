@@ -1,0 +1,51 @@
+# @package _global_
+# Capacity-matched no-anchor control for the anchor A/B. Identical to vae_baseline_1024_l8_16 (base VAE,
+# 1024 tokens, ratio-20, plain MSE, kl1e-4, cosine 3e-4, 20 ep) EXCEPT the decoder is 22 layers instead of
+# 16. This adds +6 latent-set self-attn layers = the same depth AnchorVAE gains from its 6-layer Anchor
+# stack (which runs on post-KL z → decoder-side placement), but WITHOUT anchor coords or anchor
+# cross-attention. Total latent self-attn depth 8+22=30 matches AnchorVAE's 8+16+6.
+# If this ≈ the anchor run → the win was just capacity; if the anchor run is clearly better → the anchor
+# design (arch + its chamfer/mse supervision) adds beyond capacity (a later w=0 arm would split those two).
+# Launch:  +experiment=vae_baseline_1024_l8_22
+defaults:
+  - /capacity: baseline_lat1024_l8_16
+  - _self_
+
+model:
+  num_decoder_layers: 22    # 16 + 6: the only change vs the l8_16 baseline
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0             # plain unweighted MSE
+
+trainer:
+  val_interval: 1
+  amp: true
+  resume: null
+  max_epochs: 20
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: vae_baseline_1024_l8_22
+  tags: [baseline, vae, lat1024, deep, ablation, capacity]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/vae_baseline_1024_l8_22/${now:%Y-%m-%d_%H-%M-%S}
