@@ -170,10 +170,10 @@ def main(cfg: DictConfig) -> None:
             mu_vecs.append(mu.flatten().cpu())
             sig_rms.append(std.pow(2).mean().sqrt().item())
             if K > 0:
-                fields = [model.decode(mu + std * torch.randn_like(std), qp).squeeze(0) for _ in range(K)]
+                fields = [model.decode(mu + std * torch.randn_like(std), qp)[0].squeeze(0) for _ in range(K)]
                 pred = torch.stack(fields).mean(0).cpu()
             else:
-                pred = model.decode(mu, qp).squeeze(0).cpu()
+                pred = model.decode(mu, qp)[0].squeeze(0).cpu()
             preds.append(pred)
             gts.append(it["gt_sdf"])
 

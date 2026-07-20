@@ -374,7 +374,8 @@ class Preprocessor(nn.Module):
         q = self._embed_surface(query)
         d = self._embed_surface(data)
         sdf_query_points = self.fourier_embedder(qp)   # xyz only
-        return q, d, sdf_query_points, gt
+        query_xyz = query[:, :3]                       # raw FPS query coords (num_latents, 3): anchor GT
+        return q, d, sdf_query_points, gt, query_xyz
 
     def _embed_surface(self, pts: torch.Tensor) -> torch.Tensor:
         # pts: (L, in_channels) = [xyz(3) | normal(in_channels-3)]; Fourier acts on xyz only.

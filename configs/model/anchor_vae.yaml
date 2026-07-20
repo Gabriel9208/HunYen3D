@@ -1,0 +1,21 @@
+# Shape VAE. Dims must stay consistent with the preprocess config (pe_freqs=8):
+#   encoder_pe_dim == query/data width = fourier(xyz) + normal + label = 3*(2*pe_freqs+1) + 4 = 51 + 4 = 55
+#   decoder_pe_dim == SDF query point width = fourier(xyz)               = 3*(2*pe_freqs+1)     = 51
+#   num_latents    == FPS query length = random_sample_count + important_sample_count = 2048 + 2048 = 4096
+_target_: src.model.shape.VAE.vae.AnchorVAE
+num_latents: 4096
+encoder_pe_dim: 55
+decoder_pe_dim: 51
+latent_dim: 64
+width: 1024
+num_head: 16
+num_encoder_layers: 8
+num_decoder_layers: 16
+num_anchor_layers: 6
+detach_anchor: false                                # true → anchor branch sends no gradient to z/encoder (ablation)
+position_encoder:                                   # embeds runtime anchor coords; MUST match query_points' embedder (preprocess/default.yaml pe_freqs=8)
+  _target_: src.model.shape.preprocess.FourierEmbedder
+  num_freqs: 8                                       # out_dim = 3*(2*8+1) = 51 = decoder_pe_dim -> AnchorDecoder.proj_anchor Linear(51, width)
+  input_dim: 3
+  include_input: true
+  include_pi: true

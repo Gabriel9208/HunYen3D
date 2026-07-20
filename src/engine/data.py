@@ -70,15 +70,16 @@ class ObjMeshDataset(Dataset):
                 cache = self.preprocessor.build_cache(path)
                 os.makedirs(os.path.dirname(cpath), exist_ok=True)
                 torch.save(cache, cpath)
-            q, d, query_points, gt_sdf = self.preprocessor.sample(cache)
+            q, d, query_points, gt_sdf, query_xyz = self.preprocessor.sample(cache)
         else:  # heavy mode (debug): run on the fly, no cache saved
-            q, d, query_points, gt_sdf = self.preprocessor(path)
+            q, d, query_points, gt_sdf, query_xyz = self.preprocessor(path)
 
         return {
             "query": q,                    # (L_q, encoder_pe_dim)
             "data": d,                     # (L_d, encoder_pe_dim)
             "query_points": query_points,  # (S, decoder_pe_dim)
             "gt_sdf": gt_sdf,              # (S, 1)
+            "query_xyz": query_xyz,        # (num_latents, 3) FPS query coords, anchor GT
         }
 
     def _check_signature(self, cache: dict, cpath: str) -> None:

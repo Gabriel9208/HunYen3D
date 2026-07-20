@@ -57,8 +57,8 @@ def main(cfg: DictConfig) -> None:
             qp = a["query_points"].unsqueeze(0).to(device)
             gt = a["gt_sdf"].unsqueeze(0).to(device)
 
-            sdf_aa = model.decode(mu_a, qp)   # right latent
-            sdf_ba = model.decode(mu_b, qp)   # wrong latent (B's) reconstructing A
+            sdf_aa = model.decode(mu_a, qp)[0]   # right latent (decode → (sdf, anchors))
+            sdf_ba = model.decode(mu_b, qp)[0]   # wrong latent (B's) reconstructing A
 
             recon.append(F.mse_loss(sdf_aa, gt).item())
             swap.append(F.mse_loss(sdf_ba, gt).item())

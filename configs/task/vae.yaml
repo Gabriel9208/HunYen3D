@@ -1,4 +1,6 @@
 _target_: src.engine.task.VAETask
 kl_weight: 1.0e-3
 deterministic: false   # true → train on z=μ (no sampling); used by grid_overfit's pure-capacity gate
+anchor_chamfer_weight: 0.0  # AnchorVAE only: chamfer(anchors, FPS query xyz), 主. 0 → non-anchor runs unchanged
+anchor_mse_weight: 0.0      # AnchorVAE only: index-aligned MSE(anchors, FPS query xyz), 輔
 # recon_loss is injected by the loss config group (see config.yaml defaults); defaults to weighted

@@ -31,6 +31,17 @@ class BaseTask(ABC):
     def step(self, model: nn.Module, batch) -> StepOutput: ...
 
 
+def chamfer_l1(pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
+    """Differentiable bidirectional Chamfer (mean nearest-neighbour Euclidean distance).
+
+    pred (B,P,3), gt (B,G,3) -> scalar. Same ‖·‖ as the numpy metric in src/metrics/chamfer.py,
+    but built from torch.cdist + min so it can be backpropped (cKDTree can't). For anchors this is
+    a tiny (B,1024,1024) cdist.
+    """
+    d = torch.cdist(pred, gt)  # (B,P,G) pairwise L2
+    return d.min(2).values.mean() + d.min(1).values.mean()
+
+
 def near_surface_weight(gt: torch.Tensor, lam: float, beta: float) -> torch.Tensor:
     """Near-surface weight w = 1 + λ·exp(−β·|gt|).
 
@@ -156,10 +167,15 @@ class VAETask(BaseTask):
     `r` in `recon + r * KL` and is config-driven.
     """
 
-    def __init__(self, recon_loss, kl_weight: float = 1.0e-3, deterministic: bool = False) -> None:
+    def __init__(self, recon_loss, kl_weight: float = 1.0e-3, deterministic: bool = False,
+                 anchor_chamfer_weight: float = 0.0, anchor_mse_weight: float = 0.0) -> None:
         self.recon_loss = recon_loss
         self.kl_weight = kl_weight
         self.deterministic = deterministic  # True → train on z=μ (no sampling), the pure-capacity overfit path
+        # Anchor supervision (AnchorVAE only; both 0 → base VAE / non-anchor runs unchanged). Anchors are
+        # supervised toward the FPS query coords: chamfer (permutation-invariant) + index-aligned MSE.
+        self.anchor_chamfer_weight = anchor_chamfer_weight
+        self.anchor_mse_weight = anchor_mse_weight
 
     def step(self, model: nn.Module, batch) -> StepOutput:
         z, kl = model.encode(batch["query"], batch["data"], sample_posterior=not self.deterministic)
@@ -167,22 +183,29 @@ class VAETask(BaseTask):
         return self.compute_loss(model, batch, z, kl)
 
     def compute_loss(self, model: nn.Module, batch, z, kl) -> StepOutput:
-        pred_sdf = model.decode(z, batch["query_points"])
+        pred_sdf, anchors = model.decode(z, batch["query_points"])
         recon_loss = self.recon_loss(pred_sdf, batch["gt_sdf"])
 
         loss = recon_loss + self.kl_weight * kl.mean()
 
         gt_sdf = batch["gt_sdf"]
-        return StepOutput(
-            loss=loss,
-            metrics={
-                "recon": recon_loss.item(),
-                "kl": kl.mean().item(),
-                # sign-IoU on the query points, as percentages; near-free (no MC).
-                "viou": _VIOU(pred_sdf, gt_sdf) * 100,
-                "siou": _SIOU(pred_sdf, gt_sdf) * 100,
-            }
-        )
+        metrics = {
+            "recon": recon_loss.item(),
+            "kl": kl.mean().item(),
+            # sign-IoU on the query points, as percentages; near-free (no MC).
+            "viou": _VIOU(pred_sdf, gt_sdf) * 100,
+            "siou": _SIOU(pred_sdf, gt_sdf) * 100,
+        }
+
+        if anchors is not None and (self.anchor_chamfer_weight or self.anchor_mse_weight):
+            qx = batch["query_xyz"]
+            cd = chamfer_l1(anchors, qx)
+            mse_a = F.mse_loss(anchors, qx)
+            loss = loss + self.anchor_chamfer_weight * cd + self.anchor_mse_weight * mse_a
+            metrics["anchor_cd"] = cd.item()
+            metrics["anchor_mse"] = mse_a.item()
+
+        return StepOutput(loss=loss, metrics=metrics)
 
 
 if __name__ == "__main__":
@@ -267,3 +290,16 @@ if __name__ == "__main__":
     off = SignHingeSDFLoss(near_beta=100.0, sign_weight=0.0)(pred, gt)
     assert torch.allclose(off, WeightedSDFLoss(near_beta=100.0)(pred, gt)), off
     print("OK: hinge sign_weight=0 equals plain WeightedSDFLoss")
+
+    # === chamfer_l1 (anchor supervision) ===
+    # identical clouds → 0; a cluster shifted by s ≫ internal spacing → both directions ≈ s → total ≈ 2s
+    x = torch.rand(2, 128, 3, requires_grad=True)
+    # cdist's fast mm path (‖a‖²+‖b‖²−2a·b) has a ~1e-4 float32 self-distance floor; negligible for a loss.
+    assert chamfer_l1(x, x.detach()).item() < 1e-3, "identical clouds → ~0"
+    a = torch.rand(1, 64, 3) * 0.01
+    cd = chamfer_l1(a, a + torch.tensor([5.0, 0.0, 0.0]))
+    assert abs(cd.item() - 10.0) < 0.1, cd  # shift 5, bidirectional → ~2×5
+    # differentiable: backward populates a gradient on the input cloud
+    chamfer_l1(x, torch.rand(2, 200, 3)).backward()
+    assert x.grad is not None and x.grad.abs().sum() > 0, "chamfer_l1 must be differentiable"
+    print("OK: chamfer_l1 identity→0, shift→2×, differentiable")

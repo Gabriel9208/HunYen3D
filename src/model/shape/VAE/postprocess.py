@@ -33,7 +33,7 @@ class Postprocess:
         sdf = []
         for i in range(0, grid.shape[0], self.chunk):
             pe = self.fourier_embedder(grid[i:i + self.chunk]).unsqueeze(0).to(z.device)  # embed on CPU, then move to device
-            sdf.append(decode(z, pe).reshape(-1).cpu())
+            sdf.append(decode(z, pe)[0].reshape(-1).cpu())  # decode → (sdf, anchors); mesh uses sdf only
         return self._extract(torch.cat(sdf).reshape(r, r, r).numpy(), r)
 
     @staticmethod
