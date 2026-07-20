@@ -67,6 +67,17 @@ radius of the Gaussian sample shell in latent space.
   (field standard) or stay in a healthy-posterior regime. Not a KL problem; KL is a usable knob.
 - **Capacity gate PASSED (2026-07-15):** the smallest cell memorises one mesh to F-score 1.00, NC 0.94,
   Chamfer 0.009, S-IoU 90%. Architecture is sufficient → the 2×2 grid is unblocked.
+- **More encoder KV points reconstructed WORSE (2026-07-18).** After the KV bug fix, the "Hunyuan-correct"
+  ratio-20 (KV 20480) scored **V-IoU 24.5%** vs the incidental pre-fix ratio-8 (KV 8192) **40.7%** — same
+  1024-token baseline, 20 ep, μ-path, 256 shapes. Counterintuitive, stable (not seed noise). Sample-avg
+  re-eval pending; **use ratio-8 as the recon baseline.** (Stage-3.)
+- **Anchor VAE is the new reconstruction best (2026-07-19), and the gain is the MECHANISM not capacity
+  (2026-07-20).** Per-token surface anchors fed to the decoder → **V-IoU 48.5%** (256 shapes, μ-path) vs the
+  ratio-8 baseline's 40.7%, RMS halved to 0.023, on the *worse* ratio-20 KV. μ-path ≈ sample-avg (healthy
+  posterior). μ-spread 0.37→2.40 (drove KL→7). **Capacity control (dec22, +6 layers, param-matched)**: the
+  +6 depth lifts IoU (24.5→42.4%) but leaves surface fidelity flat (Chamfer 0.127≈ratio-20 0.125) — **only
+  the anchor mechanism halves Chamfer (0.060) and doubles F-score (0.483)**. Next: detach splits
+  architecture vs supervision. (Stage-3.)
 
 ## Hard-won process lessons (the expensive ones)
 
@@ -189,6 +200,122 @@ kl1e-3) — no clean deep 2048-vs-4096 pair exists. **Caveat:** this clean pair 
 `random_sample_count + important_sample_count`; you cannot hold query sampling fixed while changing the
 latent count (they are the same number). Eval each cell in its native config.
 
+## Stage-3 — Encoder KV ratio + Anchor VAE (2026-07-17 .. 07-19)
+
+### Encoder KV downsample-ratio: more KV points reconstructed WORSE (2026-07-17..18)
+
+**Bug context.** Encoder KV ("data") count was a fixed `down_sample_count=4096` per branch, so the effective
+KV/query ratio drifted with `num_latents`. Commit `3210ef9` fixed it to derive KV from a fixed
+`downsample_ratio` (Hunyuan uses 20): KV/branch = `downsample_ratio × {random,important}_sample_count`. For
+the 1024-token baseline (rand+imp = 512+512): pre-fix → KV 8192 (ratio 8); fixed → KV 20480 (ratio 20).
+
+**Two finished 20-ep `vae_baseline_1024_l8_16` runs, identical except KV** (each eval'd in its OWN training
+regime; best.pt; **μ-path**, 256 val shapes, fixed_seed=0):
+
+| KV (ratio) | V-IoU | S-IoU | overall RMS | σ_rms | μ-spread |
+|---|---|---|---|---|---|
+| 8192 (ratio 8, pre-fix) | **40.7%** | **40.8%** | **0.046** | 0.880 | 0.371 |
+| 20480 (ratio 20, Hunyuan-correct) | 24.5% | 23.4% | 0.056 | 0.863 | 0.388 |
+
+→ **Counterintuitive: the "correct" ratio-20 reconstructs markedly WORSE.** 2.5× more encoder KV nearly
+halved V-IoU. Stable, not luck — matched at 32 shapes (41.5/23.6) and 256; same seed/shapes for both.
+Hypotheses (unresolved): KV 20480 over-redundant for 1024 latents → cross-attention diluted; or ratio-20
+needs more epochs/larger latent to absorb the extra KV. **Caveat: μ-path eval** (the log's own lesson —
+μ-path understates vs sample-avg K=32); the *comparison* is valid (both same handicap) but absolute IoU is
+likely higher under sample-avg → a sample-avg re-eval is pending. **Action: ratio-8 is the recon baseline.**
+
+### Anchor VAE — per-token surface anchors as decoder conditioning (2026-07-18..19)
+
+**Design (`AnchorVAE`, subclass of base VAE).** On top of enc8/dec16: (1) an **`Anchor` module** = 6
+self-attn layers on the sampled z → `proj_anchor` → per-token raw coords `(B, num_latents, 3)`; (2) a
+stateless `FourierEmbedder` (no params, same PE as the SDF query points) embeds those coords; (3) an
+**`AnchorDecoder`** with a second cross-attention (`anchor_cross_attention`: anchor tokens attend to latent)
+in front of the SDF-query cross-attention. Latent token i ↔ FPS query point i (encoder preserves order) →
+anchors are per-token.
+
+**Supervision (new in `task.py`).** Anchors pulled toward the **FPS query points' raw xyz** with
+**chamfer-L1 (主, differentiable `torch.cdist` bidirectional NN, weight 1.0) + index-aligned MSE (輔, weight
+0.1)**. Config knobs `anchor_chamfer_weight` / `anchor_mse_weight` default 0 → base VAE and all prior runs
+unchanged. Raw `anchor_cd` / `anchor_mse` logged to wandb (train + val).
+
+**Status — DONE (`anchor_baseline_1024_l8_16`, AnchorVAE on ratio-20, kl1e-4, plain MSE, 20 ep).** Blended
+val-loss settled to 0.0071 (ep19). **Eval (best.pt, 256 val shapes, fixed_seed=0):**
+
+| run | eval | V-IoU | S-IoU | RMS | σ_rms | μ-spread |
+|---|---|---|---|---|---|---|
+| plain ratio-20 baseline | μ-path | 24.5% | 23.4% | 0.056 | 0.86 | 0.37 |
+| plain ratio-8 baseline (prior best) | μ-path | 40.7% | 40.8% | 0.046 | 0.88 | 0.37 |
+| **anchor (ratio-20)** | **μ-path** | **48.5%** | **46.9%** | **0.023** | 0.59 | 2.40 |
+| **anchor (ratio-20)** | sample-avg K=32 | 48.7% | 47.0% | 0.023 | 0.59 | 2.40 |
+
+→ **Anchor is the new best by a clear margin** — V-IoU 48.5% vs the ratio-8 winner's 40.7%, RMS halved
+(0.023), and it did so on the *worse* ratio-20 KV regime. **μ-path ≈ sample-avg** (48.5≈48.7) → healthy
+posterior, decode(μ) intact, latent locally smooth around μ (a good sign for generation). **μ-spread jumped
+0.37→2.40 with σ_rms 0.88→0.59** → the anchor supervision spreads the per-shape μ far apart (expressive,
+**no collapse**) and tightens σ — this is exactly what drove KL→7 (KL ∝ μ²). Not yet attributed to design vs
++6 layers vs supervision → the capacity + detach ablations.
+
+**Mesh metrics (`+viz`, 16 shapes, res-128, μ-path, MC + surface sampling; all 16/16 extracted a surface):**
+
+| run | V-IoU | S-IoU | Chamfer↓ | F@.02↑ | NC↑ |
+|---|---|---|---|---|---|
+| **anchor (ratio-20)** | **48.3%** | **46.3%** | **0.060** | **0.483** | **0.791** |
+| ratio-8 (prior best) | 42.5% | 42.6% | 0.093 | 0.283 | 0.715 |
+| ratio-20 (plain) | 24.4% | 23.5% | 0.125 | 0.226 | 0.627 |
+
+→ The continuous fine-surface arbiters agree with V-IoU: **anchor wins every metric** — Chamfer −35% vs
+ratio-8, F-score 1.7×, smoothest normals. **Caveat: res-128 μ-path** (not the log's res-256 sample-avg
+convention — e.g. cell-A's logged Chamfer 0.040 / F 0.685 was res-256), so these absolute numbers are
+handicapped and NOT comparable to earlier res-256 rows; the three here are mutually comparable (same
+res/mode/shapes). PNGs saved to `results/{anchor,ratio8,ratio20}_viz/`.
+
+**KL note (generation-relevant).** Non-detach anchor inflated KL to **~7 by ep15** — kl1e-4 barely
+regularises, and the chamfer/mse push surface *positions* into z → μ grows. **Not** a stop-signal for
+*reconstruction* (KL loss share ~7e-4, val still improving), but it matters for the eventual **DiT/generation
+stage**: a latent far from the prior needs a smooth, normalizable structure. High KL ≠ unusable (LDM uses a
+tiny KL weight + a latent scaling factor); the real failure modes are a non-smooth/holey latent (KL too
+weak) or posterior collapse (KL too strong). → treat latent health (σ_rms, μ-spread, **sample-decode**) as a
+first-class metric across arms, and plan a separate KL-control sweep (warmup / free-bits / larger weight).
+
+### Ablation 1 — Capacity control: the anchor gain is the MECHANISM, not depth (2026-07-20)
+
+`vae_baseline_1024_l8_22` (base VAE, enc8/**dec22** = +6 decoder self-attn, no anchor). Param-matched to
+within 3%: dec22 = 403.4M vs AnchorVAE 416.1M; **latent self-attn depth exactly equal (30 each**: 8+22 vs
+8+16+6); the 12.7M gap = AnchorVAE's one extra `anchor_cross_attention` block. So this isolates raw depth.
+
+| 16 shapes, res-128, μ-path | anchor (r20) | **capacity dec22** | ratio-8 | ratio-20 (dec16) |
+|---|---|---|---|---|
+| V-IoU | **48.3%** | 42.6% | 42.5% | 24.4% |
+| S-IoU | 46.3% | 44.6% | 42.6% | 23.5% |
+| Chamfer↓ | **0.060** | 0.127 | 0.093 | 0.125 |
+| F@.02↑ | **0.483** | 0.225 | 0.283 | 0.226 |
+| NC↑ | **0.791** | 0.694 | 0.715 | 0.627 |
+| μ-spread | 2.40 | 0.39 | 0.37 | 0.37 |
+
+*(256-shape μ-path V-IoU: anchor 48.5 / capacity 42.4 / ratio-8 40.7 / ratio-20 24.5.)*
+
+→ **The anchor gain is NOT capacity.** Two distinct effects separate cleanly:
+- **Raw depth helps OCCUPANCY only.** +6 layers lifted ratio-20 V-IoU 24.5→42.4% (global inside/outside
+  nearly doubled) — depth is a real IoU lever, consistent with the depth findings.
+- **Raw depth does NOTHING for SURFACE FIDELITY.** capacity Chamfer 0.127 ≈ ratio-20 0.125, F-score 0.225
+  ≈ 0.226 — the extra depth left the continuous surface arbiters flat. **Only the anchor mechanism moves
+  them** (Chamfer halved to 0.060, F-score 2.1×). This attributes the eyeballed "anchor closes holes /
+  restores detail, capacity still holey/over-smooth" to the **anchor design**, not depth.
+- capacity keeps a normal latent (μ-spread 0.39, like baselines) → the KL/μ inflation is anchor-supervision-
+  specific, not a depth artifact.
+- **Still open:** anchor > capacity = "anchor mechanism (architecture + chamfer/mse supervision) beats pure
+  depth"; it does NOT yet split **architecture vs supervision** → the detach run (below), then a weight=0 arm.
+
+**Ablation queue (single GPU, to attribute the anchor gain).**
+1. ✅ **DONE — Capacity control** `vae_baseline_1024_l8_22` (above): anchor beats it, esp. on surface fidelity.
+2. 🏃 **RUNNING — Detach** `anchor_detach_1024_l8_16` — `self.anchor(z.detach())`: the anchor branch sends
+   **no gradient to z/encoder** (latent shaped by SDF recon only; anchor is a read-only predictor). Expected
+   to keep KL lower → generation-friendlier. CPU-verified: anchor-only backward gives encoder |grad|=0 (vs
+   non-detach leaks), recon still trains the encoder. Tests whether the anchor *conditioning* helps without
+   the supervision polluting the latent (if it still closes holes → conditioning-architecture is the driver).
+3. (later) "anchor arch, weight=0" would split architecture from supervision.
+   Order: **current run → eval → capacity → detach.**
+
 ## Metrics (decided)
 
 Chamfer-L1 + V-IoU + S-IoU + Normal-Consistency + F-score@0.02, all in `src/metrics/` with per-metric
@@ -234,6 +361,12 @@ N/A fallback when a mesh is empty/uncomputable. Range / direction / scale anchor
 | **07-16** | **Cell A budget sweep 5→20 ep (Stage-2 results above)** | **Budget was the dominant lever**: V-IoU 43→63%, F 0.27→0.69. Old "45%" was undertrained. Plateau ~ep 15-17 → budget ≈15-20 ep. |
 | **07-16** | **2048-vs-4096 re-eval (clean pair)** | **"2048 beats 4096" withdrawn** — indistinguishable under seed noise; 4096 swings V-IoU 28-38% and is unstable. Headline's deep pair was loss-confounded. |
 | **07-16** | **Paper check: Hunyuan3D-2 recon uses 1024 tokens** | Reference is "few tokens, deep" → token count is not our bottleneck. Plan pivots to **1024 + depth**. |
+| **07-17** | **Encoder KV bug fix (`3210ef9`): KV = `downsample_ratio`×query, was fixed 4096** | Two 20-ep 1024-baselines: ratio-8 (KV 8192, pre-fix) vs ratio-20 (KV 20480, correct) |
+| **07-18** | **KV ratio eval (μ-path, 256 shapes)** | **ratio-8 beats ratio-20** (V-IoU 40.7 vs 24.5%) — 2.5× more KV *hurt*; counterintuitive, stable not luck. ratio-8 = recon baseline. (Stage-3) |
+| **07-18** | **Anchor VAE built + supervised** (chamfer 1.0 + index-aligned MSE 0.1 → FPS query xyz) | wired end-to-end, CPU-verified (anchor stack gets gradient), launched 20 ep on ratio-20 |
+| **07-19** | **Anchor run @ep15: recon strong, KL ballooned to ~7** | KL a non-issue for recon, flagged for generation; ablations queued (capacity `l8_22`, detach) |
+| **07-19** | **Anchor run DONE (20 ep) + eval** | **New best: V-IoU 48.5%** (vs ratio-8 40.7%), RMS 0.023, on ratio-20. μ≈sample-avg (healthy). Capacity control `l8_22` launched next. |
+| **07-20** | **Capacity control `l8_22` DONE + eval (Ablation 1)** | **Anchor gain is the MECHANISM, not depth.** +6 layers help IoU (24.5→42.4%) but NOT surface (Chamfer/F flat vs ratio-20); only anchor moves them (Chamfer 0.060, F 0.483). Detach launched next. |
 
 ## Papers
 
@@ -248,12 +381,15 @@ N/A fallback when a mesh is empty/uncomputable. Range / direction / scale anchor
 
 ## Backlog / open questions
 
-- **RUNNING (2026-07-16): the single VAE baseline — 1024 tokens + enc8/dec16** (`vae_baseline_1024_l8_16`,
-  cosine 3e-4→1e-6, kl1e-4, plain MSE, 20 ep, 327M params, batch 2×16). This **replaces the whole 2×2
-  grid**: matching the reference depth (8/16) directly means no shallow-vs-deep sweep is needed, and 1024
-  tokens matches the Hunyuan3D-2 reconstruction config. Drop 4096 (unstable, no better) and the depth
-  ladder. Watch val/S-IoU for the plateau. Open: confirm which config the paper's 1024 is; does 1024 hurt
-  on our 45k (small data may prefer fewer tokens).
+- **DONE (2026-07-18): the single VAE baseline — 1024 tokens + enc8/dec16** (`vae_baseline_1024_l8_16`,
+  cosine 3e-4→1e-6, kl1e-4, plain MSE, 20 ep, batch 2×16). Replaced the 2×2 grid. Two finished runs (ratio-8
+  / ratio-20) → **ratio-8 is the recon baseline** (Stage-3; more KV hurt). Still open: confirm which config
+  the paper's 1024 is; does 1024 hurt on our 45k (small data may prefer fewer tokens); **sample-avg re-eval**
+  of the ratio pair (current numbers are μ-path).
+- **Anchor VAE line (Stage-3).** `anchor_baseline_1024_l8_16` **DONE + eval'd → new best (V-IoU 48.5%)**.
+  **RUNNING: capacity control `vae_baseline_1024_l8_22`** (base VAE +6 dec layers, no anchor). **QUEUED:
+  detach `anchor_detach_1024_l8_16`**. Goal: attribute the gain to design vs +6 layers vs supervision, and
+  check latent health for generation. TODO: `+viz` chamfer/F-score/eyeball on the anchor winner.
 - Re-test auxiliary/redundant losses (sign-hinge, eikonal) by **IoU/mesh**, not near-sign — their real
   effect was never measured (only the wrong metric was).
 - KL knob: free-bits vs warmup vs fixed `kl_weight` — effect on μ-usability and recon sharpness (KL is reopened as
