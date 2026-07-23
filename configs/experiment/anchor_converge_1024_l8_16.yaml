@@ -1,0 +1,52 @@
+# @package _global_
+# Converge run of the AnchorVAE (the proposed architecture): mirror of anchor_kl1e3_1024_l8_16 (1024 tokens,
+# enc8/dec16 + 6-layer anchor stack, ratio-20, plain MSE, kl1e-3, chamfer 1.0 / mse 0.1) but trained to
+# convergence with a CONSTANT LR (no scheduler) and NO fixed epoch budget: max_epochs=-1 loops forever until
+# the process is manually stopped. From scratch (resume: null). last.pt/best.pt are saved every epoch, so a
+# kill loses at most the current epoch and can be resumed. NB (RESEARCH_LOG Stage-1): constant LR floors the
+# loss at the SGD noise ball — this reaches a plateau, not the cosine-quality minimum; settle later with a
+# short decay / lower LR resume if wanted.
+# Launch:  +experiment=anchor_converge_1024_l8_16
+defaults:
+  - /capacity: baseline_lat1024_l8_16
+  - override /model: anchor_vae
+  - override /scheduler: null   # turn off the scheduler -> constant LR (same pattern as cap_deepmse_nosched)
+  - _self_
+
+optimizer:
+  lr: 3.5e-5                    # constant (no scheduler); low -> settles closer to a real minimum, slower early
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-3               # same as anchor_kl1e3_1024_l8_16
+  anchor_chamfer_weight: 1.0    # 主
+  anchor_mse_weight: 0.1        # 輔
+  recon_loss:
+    near_beta: 0                # plain unweighted MSE
+
+trainer:
+  max_epochs: -1                # infinite: train until manually stopped (last.pt saved every epoch)
+  val_interval: 1
+  amp: true
+  resume: null                  # from scratch
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: anchor_converge_1024_l8_16
+  tags: [anchor, vae, lat1024, deep, kl1e3, converge, constant-lr]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/anchor_converge_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,0 +1,54 @@
+# @package _global_
+# Loss A/B against anchor_kl1e3_1024_l8_16: IDENTICAL champion recipe (AnchorVAE, 1024 tokens, ratio-20,
+# kl1e-3, anchor chamfer 1.0 / mse 0.1, cosine 3e-4→1e-6, 20 ep) with ONLY the SDF recon loss swapped
+# WeightedSDFLoss(near_beta=0, plain MSE) → SignAwareSDFLoss (near_beta=100 near-surface weighting +
+# sign_weight=0.1 BCE). Motivation: plain MSE's gradient ∝ residual vanishes exactly at the surface, so
+# the zero level-set is under-fit → bumpy flats + holes on thin panels + ~51% V-IoU ceiling (GT SDF was
+# verified clean, so the ceiling is the loss, not the data). BCE's gradient is strongest at the decision
+# boundary → restores a non-vanishing surface gradient. JUDGE BY IoU / Chamfer / mesh, NOT near-sign-acc
+# (which saturates — the metric that wrongly retired this loss the first time).
+# NOTE: this changes two things vs the MSE champion at once (near-weighting ON + BCE term). If it wins, a
+# follow-up can ablate sign_weight=0 (near-weight only) to split the two.
+# Launch:  +experiment=anchor_signaware_kl1e3_1024_l8_16
+defaults:
+  - /capacity: baseline_lat1024_l8_16
+  - override /model: anchor_vae
+  - override /loss@task.recon_loss: sign_aware   # WeightedSDFLoss → SignAwareSDFLoss (MSE + BCE sign)
+  - _self_
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-3
+  anchor_chamfer_weight: 1.0
+  anchor_mse_weight: 0.1
+  # recon_loss params come from configs/loss/sign_aware.yaml: near_weight 4.0, near_beta 100, sign_weight 0.1, sign_temp 30
+
+trainer:
+  val_interval: 1
+  amp: true
+  resume: null
+  max_epochs: 20
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: anchor_signaware_kl1e3_1024_l8_16
+  tags: [anchor, vae, lat1024, deep, kl1e3, sign-aware, bce, loss-ab]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/anchor_signaware_kl1e3_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

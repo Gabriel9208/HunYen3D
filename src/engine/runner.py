@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import logging
 
 import torch
@@ -74,8 +75,15 @@ class Trainer:
             self._resume(self.cfg.resume)
 
         with logging_redirect_tqdm():
+            # max_epochs < 0 (sentinel -1) -> train forever until the process is stopped;
+            # last.pt is saved every epoch so a manual kill loses at most the current epoch.
+            epochs = (
+                itertools.count(self.epoch)
+                if self.max_epochs < 0
+                else range(self.epoch, self.max_epochs)
+            )
             epoch_bar = tqdm(
-                range(self.epoch, self.max_epochs),
+                epochs,
                 desc="epochs",
                 position=0,
                 disable=not self.progress,
@@ -188,7 +196,14 @@ class Trainer:
     def _resume(self, path: str) -> None:
         ckpt = CheckpointManager.load(path, map_location=self.device)
         self.model.load_state_dict(ckpt["model"])
-        self.optimizer.load_state_dict(ckpt["optimizer"])
+        lrs = [g["lr"] for g in self.optimizer.param_groups]  # config lr built this run, pre-restore
+        self.optimizer.load_state_dict(ckpt["optimizer"])     # keeps Adam moments, but also restores old lr
+        if self.scheduler is None:
+            # No scheduler → nothing re-drives lr, so the checkpoint's lr would silently win. Keep the
+            # config lr instead (lets a resume fine-tune at a new constant lr). With a scheduler this is
+            # skipped: the scheduler owns lr and re-sets it every step from its restored state.
+            for g, lr in zip(self.optimizer.param_groups, lrs):
+                g["lr"] = lr
         if self.scheduler is not None and ckpt.get("scheduler") is not None:
             self.scheduler.load_state_dict(ckpt["scheduler"])
         self.epoch = ckpt.get("epoch", 0)
@@ -210,9 +225,10 @@ def run(cfg: DictConfig) -> None:
     # Build the dataloader first so len(train_loader) is known; the scheduler's T_max is auto-computed from the total optimizer-step count.
     train_loader, val_loader = build_dataloaders(cfg.data)
     steps_per_epoch = len(train_loader) // max(1, int(tcfg.grad_accum_steps))
-    total_steps = steps_per_epoch * int(tcfg.max_epochs)
+    max_epochs = int(tcfg.max_epochs)
+    total_steps = steps_per_epoch * max_epochs if max_epochs > 0 else None  # None for infinite (-1): no T_max autofill
     scheduler = build_scheduler(cfg.get("scheduler"), optimizer, total_steps=total_steps)
-    log.info("scheduler total_steps (T_max if missing): %d", total_steps)
+    log.info("scheduler total_steps (T_max if missing): %s", total_steps)
 
     logger = WandbLogger(cfg.wandb, full_cfg=cfg)
     logger.init()

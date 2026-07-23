@@ -1,0 +1,49 @@
+# @package _global_
+# KL sweep of anchor_baseline_1024_l8_16: IDENTICAL non-detach AnchorVAE run (1024 tokens, enc8/dec16,
+# ratio-20, plain MSE, cosine 3e-4→1e-6, 20 ep, chamfer 1.0 / mse 0.1) with the ONLY change being
+# kl_weight 1e-4 → 1e-3. The non-detach anchor inflated KL to ~7 at kl1e-4 (μ-spread 0.37→2.40); a 10× KL
+# weight tests whether it keeps μ closer to the prior (generation-friendlier latent) while retaining the
+# anchor reconstruction gain. Watch: KL magnitude, μ-spread/σ_rms, and whether viou/siou hold vs kl1e-4.
+# Launch:  +experiment=anchor_kl1e3_1024_l8_16
+defaults:
+  - /capacity: baseline_lat1024_l8_16
+  - override /model: anchor_vae
+  - _self_
+
+optimizer:
+  lr: 3e-4
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-3            # the only difference vs anchor_baseline_1024_l8_16 (was 1e-4)
+  anchor_chamfer_weight: 1.0   # 主, same as the kl1e-4 arm
+  anchor_mse_weight: 0.1       # 輔, same as the kl1e-4 arm
+  recon_loss:
+    near_beta: 0             # plain unweighted MSE
+
+trainer:
+  val_interval: 1
+  amp: true
+  resume: null
+  max_epochs: 20
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: anchor_kl1e3_1024_l8_16
+  tags: [anchor, vae, lat1024, deep, kl1e3, kl-sweep]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/anchor_kl1e3_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}
