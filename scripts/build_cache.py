@@ -82,7 +82,7 @@ def main(cfg: DictConfig) -> None:
     force = bool(cfg.get("force", False))
 
     seen: set[str] = set()
-    for split in ("train", "val"):
+    for split in ("train", "val", "test"):
         print(f"[build_cache] start to build {split} preprocess cache...")
         ds = cfg.data[split].dataset
         cache_dir = ds.get("cache_dir")

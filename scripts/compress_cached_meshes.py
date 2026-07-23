@@ -113,7 +113,7 @@ def main(cfg: DictConfig) -> None:
     total_orig = 0
     total_comp = 0
 
-    for split in ("train", "val"):
+    for split in ("train", "val", "test"):
         ds = cfg.data[split].dataset
         cache_dir = ds.get("cache_dir")
         if cache_dir is None:

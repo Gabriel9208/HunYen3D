@@ -120,9 +120,10 @@ def _preflight(cfg: DictConfig) -> None:
         raise SystemExit(f"ckpt not found: {ckpt}")
     cfg.ckpt = ckpt  # write back the resolved absolute path so torch.load below just works
 
-    obj_root = cfg.data.val.dataset.obj_root
+    split = cfg.get("split", "val")  # +split=test to eval on the paper test set; default val
+    obj_root = cfg.data[split].dataset.obj_root
     if not os.path.isdir(obj_root):
-        raise SystemExit(f"val obj_root not found: {obj_root}")
+        raise SystemExit(f"{split} obj_root not found: {obj_root}")
 
     shapes, samples = int(cfg.get("shapes", 16)), int(cfg.get("samples", 0))
     resolution, fscore_tau = int(cfg.get("resolution", 128)), float(cfg.get("fscore_tau", 0.02))
@@ -142,7 +143,7 @@ def main(cfg: DictConfig) -> None:
     model = instantiate(cfg.model).to(device).eval()
     model.load_state_dict(torch.load(cfg.ckpt, map_location=device, weights_only=False)["model"])
 
-    ds = instantiate(cfg.data.val.dataset)
+    ds = instantiate(cfg.data[cfg.get("split", "val")].dataset)
     n = min(int(cfg.get("shapes", 16)), len(ds))
     viz = bool(cfg.get("viz", False))
     v = _viz_setup(cfg, ds) if viz else None

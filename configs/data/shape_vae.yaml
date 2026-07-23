@@ -21,3 +21,12 @@ val:
     pattern: "*.off.gz"
     mode: light
     cache_dir: ${hydra:runtime.cwd}/cache
+
+test:
+  dataset:
+    _target_: src.engine.data.ObjMeshDataset
+    obj_root: ${hydra:runtime.cwd}/data/test
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache   # same flat cache (split-agnostic)
