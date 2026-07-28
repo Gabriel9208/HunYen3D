@@ -27,7 +27,7 @@ trainer:
   val_interval: 1
   amp: true
   # resume from the pre-÷10 converge run's best.pt (Adam moments + epoch/step restored; lr forced to 3.5e-6)
-  resume: /home/gabriel/dev/HunYen3D/outputs/anchor_converge_1024_l8_16/2026-07-21_11-48-27/checkpoints/best.pt
+  resume: /home/gabriel/dev/HunYen3D/outputs/anchor_converge_lr3.5e-6_1024_l8_16/2026-07-27_07-41-47/checkpoints/last.pt
 
 data:
   train:
@@ -43,7 +43,7 @@ wandb:
   name: anchor_converge_lr3.5e-6_1024_l8_16
   tags: [anchor, vae, lat1024, deep, kl1e3, converge, constant-lr, lr3.5e-6, resume]
   mode: online
-  id: null                      # null -> wandb mints a NEW run id (does not continue the old run)
+  id: 3r78eepe                  # continue the SAME wandb run (resume the paused lr3.5e-6 curve)
   resume: allow
 
 hydra:

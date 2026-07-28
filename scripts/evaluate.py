@@ -160,6 +160,12 @@ def main(cfg: DictConfig) -> None:
     chamfers, fscores, ncs = [], [], []  # per-shape mesh metrics (only shapes with an extracted surface)
     no_surface = 0
     mu_vecs, sig_rms = [], []  # per-shape flattened mu and rms(sigma): mu-spread=collapse, sigma=shell size
+    # Volume V-IoU (paper protocol): occupancy IoU over uniform-in-volume points. sample() shuffles+subsets
+    # the SDF bank, destroying the uniform-point identity, so we read the cache's unshuffled uniform tail
+    # (last n_query_uniform pts, see preprocess.py) and decode it separately in the loop below.
+    n_uni = int(getattr(ds.preprocessor, "n_query_uniform", 0) or 0)
+    vol_pts = int(cfg.get("vol_pts", 16384))   # uniform pts decoded per shape for the volume-IoU
+    vol_preds, vol_gts = [], []
     with torch.no_grad():
         for i in range(n):
             it = ds[i]
@@ -178,8 +184,27 @@ def main(cfg: DictConfig) -> None:
             preds.append(pred)
             gts.append(it["gt_sdf"])
 
+            if n_uni:  # volume-IoU: decode the cache's unshuffled uniform tail (paper's in-3D-space points)
+                c = torch.load(ds._cache_path(ds.paths[i]), weights_only=False)
+                uxyz, ug = c["sdf_query_points"][-n_uni:], c["gt_sdf"][-n_uni:].flatten()
+                if uxyz.shape[0] > vol_pts:
+                    sel = torch.randperm(uxyz.shape[0])[:vol_pts]
+                    uxyz, ug = uxyz[sel], ug[sel]
+                upe = ds.preprocessor.fourier_embedder(uxyz).unsqueeze(0).to(device)
+                if K > 0:
+                    uf = torch.stack([model.decode(mu + std * torch.randn_like(std), upe)[0].squeeze(0) for _ in range(K)]).mean(0)
+                else:
+                    uf = model.decode(mu, upe)[0].squeeze(0)
+                vol_preds.append(uf.flatten().cpu()); vol_gts.append(ug)
+
             if viz:
-                recon = v.post.to_mesh(model.decode, mu)
+                if K > 0:  # sample-avg MC: decode(mu) is off-manifold when the posterior is mu-broken, so
+                    # average K fixed latent draws per grid point (same K-sample logic as the SDF metric above)
+                    zs = [mu + std * torch.randn_like(std) for _ in range(K)]
+                    avg_decode = lambda _z, pe: (torch.stack([model.decode(zk, pe)[0] for zk in zs]).mean(0), None)
+                    recon = v.post.to_mesh(avg_decode, mu)
+                else:
+                    recon = v.post.to_mesh(model.decode, mu)
                 gt_mesh = v.load_gt(ds.paths[i])
                 rel = os.path.splitext(os.path.relpath(ds.paths[i], ds.obj_root).removesuffix(".gz"))[0]
                 v.save_pair(os.path.join(v.out, rel), gt_mesh, recon)
@@ -201,8 +226,11 @@ def main(cfg: DictConfig) -> None:
 
     pred = torch.cat(preds).flatten()
     gt = torch.cat(gts).flatten()
-    v_iou = VIOU()(pred, gt)          # occupancy IoU over all query points
+    v_iou = VIOU()(pred, gt)          # occupancy IoU over all query points (our bank is ~80% near-surface)
     s_iou = SIOU()(pred, gt)          # occupancy IoU restricted to the near-surface band
+
+    # Volume V-IoU (paper protocol): occupancy IoU over the uniform-in-volume points decoded per shape above.
+    v_iou_uniform = VIOU()(torch.cat(vol_preds), torch.cat(vol_gts)) if vol_preds else float("nan")
 
     def _iou_str(x: float) -> str:
         return "N/A (empty band)" if math.isnan(x) else f"{x * 100:.2f}%"
@@ -219,7 +247,8 @@ def main(cfg: DictConfig) -> None:
           f"(sigma_rms*sqrt({d}))  [posterior diagnostic]")
     print(f"mu-spread        : {mu_spread:.5f}  per-elem std across shapes  (near 0 = collapse)  [diagnostic]")
     print(f"overall RMS      : {(pred - gt).pow(2).mean().sqrt():.4f}  (SDF scale ~[-1,1])  [diagnostic]")
-    print(f"V-IoU (all pts)  : {_iou_str(v_iou)}")
+    print(f"V-IoU (all pts)  : {_iou_str(v_iou)}  [our default: ~80% near-surface]")
+    print(f"V-IoU (uniform)  : {_iou_str(v_iou_uniform)}  [paper volume-IoU: {min(n_uni, vol_pts)} uniform-in-vol pts/shape]")
     print(f"S-IoU (|gt|<0.02): {_iou_str(s_iou)}")
     if viz:
         print(f"chamfer          : {_mesh_agg(chamfers)}   (no surface {no_surface}/{n} → N/A)")

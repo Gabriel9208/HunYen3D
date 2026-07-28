@@ -1,6 +1,6 @@
 # @package _global_
 # THE VAE baseline run for this research: 1024 tokens + enc8/dec16 (Hunyuan3D-2 recon config) on the
-# full 45k. Plain MSE, kl1e-4, cosine 3e-4→1e-6, budget ~20 ep (from A@20's ~ep15-17 plateau + margin;
+# full 45k. Plain MSE, kl1e-3, cosine 3.5e-5→1e-6, budget ~20 ep (from A@20's ~ep15-17 plateau + margin;
 # val logs S-IoU each epoch → stop early once flat). This is the single reference-aligned baseline that
 # replaces the capacity grid.
 # Launch:  +experiment=vae_baseline_1024_l8_16
@@ -9,11 +9,11 @@ defaults:
   - _self_
 
 optimizer:
-  lr: 3e-4
+  lr: 3.5e-5
   weight_decay: 0
 
 task:
-  kl_weight: 1e-4
+  kl_weight: 1e-3
   recon_loss:
     near_beta: 0             # plain unweighted MSE
 
