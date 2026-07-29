@@ -1,0 +1,21 @@
+# Flow-matching DiT task. Encodes latents on the fly with a frozen trained VAE, then applies
+# linear flow-matching loss (velocity target) against the DiT prediction.
+# Set vae_ckpt to a trained VAE checkpoint (.pt with a "model" state_dict); the nested `vae`
+# architecture MUST match that checkpoint (the converge VAE uses num_latents=1024).
+_target_: src.engine.task.FlowMatchingTask
+vae_ckpt: ???   # required: path to trained VAE .pt (override on launch)
+flow:
+  _target_: src.model.shape.diffusion.flow_matching.FlowMatching
+  std: 1.0
+  mean: 0.0
+  shift_scale: 3.0   # SD3-style logit-normal t sampling + time shift
+vae:
+  _target_: src.model.shape.VAE.vae.VAE
+  num_latents: 1024
+  encoder_pe_dim: 55
+  decoder_pe_dim: 51
+  latent_dim: 64
+  width: 1024
+  num_head: 16
+  num_encoder_layers: 8
+  num_decoder_layers: 16

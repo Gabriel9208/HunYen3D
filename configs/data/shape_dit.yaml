@@ -1,0 +1,35 @@
+# VAE mesh inputs (for on-the-fly latent encoding) + precomputed DINOv2 cond features.
+# Same mesh cache as shape_vae; cond_dir holds the DINO cache, keyed identically
+# (<cond_dir>/<cat>/4_watertight_scaled/<id>.pt, tensor (V, L, 1536) over the rendered views).
+batch_size: 1
+num_workers: 8
+
+train:
+  dataset:
+    _target_: src.engine.data.MeshCondDataset
+    obj_root: ${hydra:runtime.cwd}/data/train
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: ${hydra:runtime.cwd}/cache_dino
+
+val:
+  dataset:
+    _target_: src.engine.data.MeshCondDataset
+    obj_root: ${hydra:runtime.cwd}/data/val
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: ${hydra:runtime.cwd}/cache_dino
+
+test:
+  dataset:
+    _target_: src.engine.data.MeshCondDataset
+    obj_root: ${hydra:runtime.cwd}/data/test
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: ${hydra:runtime.cwd}/cache_dino

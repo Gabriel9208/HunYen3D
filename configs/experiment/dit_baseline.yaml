@@ -1,0 +1,51 @@
+# @package _global_
+# Flow-matching DiT baseline: MM-DiT trained on the converge VAE's on-the-fly latents,
+# conditioned on precomputed DINOv2-Giant image features.
+#
+# preprocess.*_sample_count = 512+512 = 1024 query points -> matches the nested VAE's
+# num_latents=1024 (we do NOT pull /capacity here: that fragment sets model.num_latents etc.,
+# which MM_DiT does not have — it would inject invalid keys into the DiT).
+#
+# Before launching, set the trained VAE checkpoint:
+#   +experiment=dit_baseline task.vae_ckpt=/abs/path/to/vae_last.pt
+defaults:
+  - override /model: mm_dit
+  - override /task: flow
+  - override /data: shape_dit
+  - override /scheduler: null              # constant LR
+  - override /loss@task.recon_loss: null   # flow task has no recon_loss (root default injects one)
+  - _self_
+
+optimizer:
+  lr: 1e-4
+  weight_decay: 0
+
+preprocess:
+  random_sample_count: 512
+  important_sample_count: 512
+  downsample_ratio: 20
+
+trainer:
+  max_epochs: -1
+  val_interval: 1
+  amp: true
+  resume: null
+
+data:
+  batch_size: 1
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: dit_baseline
+  tags: [dit, flow-matching, mm-dit, dinov2]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/dit_baseline/${now:%Y-%m-%d_%H-%M-%S}

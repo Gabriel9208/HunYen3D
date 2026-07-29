@@ -90,3 +90,24 @@ class ObjMeshDataset(Dataset):
                 f"cache parameter signature mismatch ({cpath}): cache={sig} vs config={want}; "
                 f"rebuild with `scripts/build_cache.py ... force=true`."
             )
+
+
+class MeshCondDataset(ObjMeshDataset):
+    """VAE mesh inputs (for on-the-fly latent encoding) + a precomputed image-condition feature.
+
+    The DiT trains on latents encoded on the fly, so it still needs the VAE's `query`/`data`
+    (produced by the parent) — this just appends `cond`, a precomputed DINOv2 feature cache
+    keyed identically to the mesh cache (`<cond_dir>/<cat>/.../<id>.pt`, tensor (V, L, D) over
+    the V rendered views). One view is drawn per item (fixed_seed → deterministic for val).
+    """
+
+    def __init__(self, cond_dir: str, **kwargs):
+        super().__init__(**kwargs)
+        self.cond_dir = cond_dir
+
+    def __getitem__(self, idx: int):
+        item = super().__getitem__(idx)  # query, data, query_points, gt_sdf, query_xyz (+ fixed_seed set)
+        key = cache_rel_path(os.path.relpath(self.paths[idx], self.obj_root))
+        cond = torch.load(os.path.join(self.cond_dir, key), weights_only=True)  # (V, L, D)
+        item["cond"] = cond[torch.randint(len(cond), ()).item()]                 # random view
+        return item

@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from src.metrics.iou import SIOU, VIOU
+from src.model.shape.diffusion.flow_matching import FlowMatching
 
 # Stateless + cheap (sign compare on the SDF already in hand, no MC/KDTree) → log every step.
 _VIOU, _SIOU = VIOU(), SIOU()
@@ -206,6 +207,35 @@ class VAETask(BaseTask):
             metrics["anchor_mse"] = mse_a.item()
 
         return StepOutput(loss=loss, metrics=metrics)
+
+
+class FlowMatchingTask(BaseTask):
+    """Flow-matching DiT training task.
+
+    Trains `model` (the MM_DiT denoiser) with linear flow matching on VAE latents,
+    conditioned on precomputed image features. The latent x1 is produced ON THE FLY by a
+    frozen, trained VAE encoder held here (`vae.encode(query, data)` → sampled z), so the
+    dataset only needs to add `cond` on top of the normal VAE mesh inputs.
+
+    The runner builds the optimizer from `model.parameters()` only, so the VAE never trains;
+    we still freeze + no_grad it (memory, and disables dropout). The runner does NOT move the
+    task to device (only cfg.model), so the VAE is moved to the batch device inside `step`.
+    """
+
+    def __init__(self, flow: FlowMatching, vae: nn.Module, vae_ckpt: str | None = None) -> None:
+        self.flow = flow
+        if vae_ckpt is not None:  # None → vae used as-is (tests / already-loaded weights)
+            ckpt = torch.load(vae_ckpt, map_location="cpu", weights_only=False)
+            vae.load_state_dict(ckpt["model"])
+        vae.eval().requires_grad_(False)
+        self.vae = vae
+
+    def step(self, model: nn.Module, batch) -> StepOutput:
+        self.vae.to(batch["query"].device)  # runner moves cfg.model only, not the task
+        with torch.no_grad():
+            z, _ = self.vae.encode(batch["query"], batch["data"], sample_posterior=True)
+        loss = self.flow.transport(model, z, batch["cond"])
+        return StepOutput(loss=loss, metrics={"fm": loss.item()})
 
 
 if __name__ == "__main__":
