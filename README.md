@@ -4,8 +4,6 @@ A from-scratch shape autoencoder for 3D generation, written by hand in the style
 Hunyuan3D-2 — together with a diagnosis of two ways its latent representation quietly fails,
 and a fix for each.
 
-*[繁體中文版本](README.zh.md)*
-
 ---
 
 ## At a glance
@@ -374,7 +372,7 @@ conclusion. Most were stopped once the evidence pointed elsewhere.
 | `FrameVAE` | Are the uniform anchors redundant — can sharp anchors do the whole job? | No. Reconstruction got worse; the uniform branch carries necessary signal. The other rejected hypothesis. |
 | `DoubleStreamVAE` | If the uniform and the sharp anchors are really two different kinds of input, does it help to treat them as two modalities — the way MM-DiT gives text and image their own stream and lets them exchange information through joint attention? | Reconstruction came out about the same, but the encoder's parameters double (113.6M to 226.8M) because each stream carries its own projection, cross-attention and MLP. Similar result at twice the cost, so it was dropped. |
 | `MaskedVAE` | If uniform tokens may attend everywhere but sharp tokens only to sharp points, does the sharp branch stop being absorbed? | Built with a matched layer count so it adds no capacity. It converges noticeably faster, but at the channel level a great many channels come out dead, so λ-VAE is being stacked on top to address that. Still in progress. |
-| `MRLVAE` | Can the 64 channels be ordered by importance, so any prefix of the latent is usable on its own? | Trained with per-prefix reconstruction losses and per-prefix loss exponents. Exploratory; no converged test-set numbers. |
+| `MRLVAE` | A VecSet latent has no explicit spatial anchor, so every channel has to carry geometry with no assigned role, and networks fit low-frequency content first — which leaves fine detail underfit. Can nested training give the channels a coarse-to-fine ordering instead? Each step trains on the first m channels only, m drawn from {8, 16, 32, 64}, with λ-VAE keeping the later ones from going uninformative and a prefix-dependent loss exponent — squared error at m=8 falling to a square root at m=64 — putting the fine-detail burden on the full-width code. | No results yet. |
 | sqrt reconstruction loss | Does it help refine detail? Relative to mean-squared error, a square-root loss reallocates gradient away from the largest residuals and onto the smallest ones. Measured per point at eps=1e-4: 81× the MSE gradient at a residual of 1e-4, and 1/233 of it at 1e-1, with the two comparable around 4e-3 — roughly the current mean error. Fine detail is decided at the small-residual end. | Warm-starting from an MSE-pretrained model and continuing under the square-root loss does show an effect. But this is a preliminary observation on a run that has not converged. In progress. |
 
 A generative model — a diffusion transformer trained with rectified flow — is also implemented in
