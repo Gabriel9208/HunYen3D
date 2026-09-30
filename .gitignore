@@ -23,6 +23,7 @@ third_party/
 weights/
 
 # Running lab notebook — kept local, not published
+README.zh.md
 docs/RESEARCH_LOG.md
 docs/RESEARCH_LOG.zh.md
 docs/writeup/RESEARCH_LOG.md
