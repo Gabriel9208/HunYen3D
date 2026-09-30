@@ -1,0 +1,33 @@
+# Same cache/meshes as shape_vae.yaml, but the dataset calls preprocessor.sample_disjoint():
+# the sharp query portion is FPS-selected first, then the uniform/surface portion's FPS is seeded
+# to avoid it, so the two query portions can't redundantly land on the same spot (sample()'s
+# surf_fps/sharp_fps are picked independently and can overlap by chance).
+batch_size: 1
+num_workers: 8
+
+train:
+  dataset:
+    _target_: src.engine.data.DisjointVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/train
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+
+val:
+  dataset:
+    _target_: src.engine.data.DisjointVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/val
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+
+test:
+  dataset:
+    _target_: src.engine.data.DisjointVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/test
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache   # same flat cache (split-agnostic)

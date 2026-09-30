@@ -1,0 +1,33 @@
+# Same meshes and same cache as shape_vae_double_stream.yaml, but the dataset calls
+# Preprocessor.frame_sample: the query is 100% importance-branch points (FrameEncoder never uses a
+# uniform-branch query), so the uniform query's FPS pass is skipped entirely instead of computed and
+# discarded. The cache files are identical — no rebuild.
+batch_size: 1
+num_workers: 8
+
+train:
+  dataset:
+    _target_: src.engine.data.FrameVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/train
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+
+val:
+  dataset:
+    _target_: src.engine.data.FrameVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/val
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+
+test:
+  dataset:
+    _target_: src.engine.data.FrameVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/test
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache   # same flat cache (split-agnostic)

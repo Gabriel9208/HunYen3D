@@ -1,12 +1,12 @@
-# VAE mesh inputs (for on-the-fly latent encoding) + precomputed DINOv2 cond features.
-# Same mesh cache as shape_vae; cond_dir holds the DINO cache, keyed identically
-# (<cond_dir>/<cat>/4_watertight_scaled/<id>.pt, tensor (V, L, 1024) DINOv3-L patch tokens per view).
+# Same as shape_dit.yaml, but the dataset calls Preprocessor.sample_disjoint() (sharp FPS picked
+# first, uniform/surface FPS seeded to avoid it) instead of plain sample() -- matches the query
+# distribution the frozen VAE checkpoint was actually trained on.
 batch_size: 1
 num_workers: 8
 
 train:
   dataset:
-    _target_: src.engine.data.MeshCondDataset
+    _target_: src.engine.data.MeshCondDisjointDataset
     obj_root: ${hydra:runtime.cwd}/data/train
     preprocessor: ${preprocess}
     pattern: "*.off.gz"
@@ -16,7 +16,7 @@ train:
 
 val:
   dataset:
-    _target_: src.engine.data.MeshCondDataset
+    _target_: src.engine.data.MeshCondDisjointDataset
     obj_root: ${hydra:runtime.cwd}/data/val
     preprocessor: ${preprocess}
     pattern: "*.off.gz"
@@ -26,7 +26,7 @@ val:
 
 test:
   dataset:
-    _target_: src.engine.data.MeshCondDataset
+    _target_: src.engine.data.MeshCondDisjointDataset
     obj_root: ${hydra:runtime.cwd}/data/test
     preprocessor: ${preprocess}
     pattern: "*.off.gz"

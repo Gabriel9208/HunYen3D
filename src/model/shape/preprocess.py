@@ -200,16 +200,22 @@ class Mesh2Query(nn.Module):
     def fps(
         self,
         surface: torch.Tensor,
-        fps_count: int
+        fps_count: int,
+        seeds: torch.Tensor | None = None,
     ):
         n = surface.shape[0]
         fps_count = min(fps_count, n)
         surface_pc = surface[:, :3]
 
-        min_dist = torch.full((n,), torch.inf, device=surface.device)
+        if seeds is not None:
+            min_dist = torch.cdist(surface_pc, seeds[:, :3]).min(dim=1).values
+            current = int(torch.argmax(min_dist))
+        else:
+            min_dist = torch.full((n,), torch.inf, device=surface.device)
+            current = 0
+
         selected = torch.empty(fps_count, dtype=torch.long, device=surface.device)
 
-        current = 0
         for i in range(fps_count):
             selected[i] = current
             dist = torch.norm(surface_pc - surface_pc[current], dim=1)
@@ -371,16 +377,110 @@ class Preprocessor(nn.Module):
             idx = torch.randperm(qp.shape[0])[: self.sdf_subset]
             qp, gt = qp[idx], gt[idx]
 
-        q = self._embed_surface(query)
-        d = self._embed_surface(data)
+        _, q_emb, q_normal = self._embed_surface(query)
+        q = torch.cat([q_emb, q_normal], dim=-1)
+        _, d_emb, d_normal = self._embed_surface(data)
+        d = torch.cat([d_emb, d_normal], dim=-1)
+
         sdf_query_points = self.fourier_embedder(qp)   # xyz only
         query_xyz = query[:, :3]                       # raw FPS query coords (num_latents, 3): anchor GT
         return q, d, sdf_query_points, gt, query_xyz
 
-    def _embed_surface(self, pts: torch.Tensor) -> torch.Tensor:
+    def sample_disjoint(self, cache: dict): # sharp -> uniform
+        surf = self.mesh2query.downsample(cache["surface_pool"], self.downsample_ratio * self.random_sample_count)
+        sharp = self.mesh2query.downsample(cache["sharp_pool"], self.downsample_ratio * self.important_sample_count)
+        sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
+        surf_fps = self.mesh2query.fps(surf, self.random_sample_count, seeds=sharp_fps)
+
+        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important = num_latents, 7)
+        data = torch.cat([surf, sharp], dim=0)            # (downsample_ratio * (random + important), 7)
+
+        qp = cache["sdf_query_points"]
+        gt = cache["gt_sdf"]
+        if self.sdf_subset is not None and self.sdf_subset < qp.shape[0]:
+            idx = torch.randperm(qp.shape[0])[: self.sdf_subset]
+            qp, gt = qp[idx], gt[idx]
+
+        _, q_emb, q_normal = self._embed_surface(query)
+        q = torch.cat([q_emb, q_normal], dim=-1)
+        _, d_emb, d_normal = self._embed_surface(data)
+        d = torch.cat([d_emb, d_normal], dim=-1)
+
+        sdf_query_points = self.fourier_embedder(qp)
+        query_xyz = query[:, :3]
+        return q, d, sdf_query_points, gt, query_xyz
+
+    def double_stream_sample(self, cache: dict):
+        # KV (data) = downsample_ratio * query, per branch — mirrors Hunyuan's derive so the ratio stays
+        # fixed instead of drifting with num_latents. ponytail: downsample() caps at pool size, so keep
+        # downsample_ratio * max(random, important) <= num_surface_samples (else the ratio silently drops).
+        surf = self.mesh2query.downsample(cache["surface_pool"], self.downsample_ratio * self.random_sample_count)
+        sharp = self.mesh2query.downsample(cache["sharp_pool"], self.downsample_ratio * self.important_sample_count)
+        surf_fps = self.mesh2query.fps(surf, self.random_sample_count)
+        sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
+
+        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important = num_latents, 7)
+        data = torch.cat([surf, sharp], dim=0)            # (downsample_ratio * (random + important), 7)
+
+        qp = cache["sdf_query_points"]
+        gt = cache["gt_sdf"]
+        if self.sdf_subset is not None and self.sdf_subset < qp.shape[0]:
+            idx = torch.randperm(qp.shape[0])[: self.sdf_subset]
+            qp, gt = qp[idx], gt[idx]
+
+        q_xyz, q_emb, q_rest = self._embed_surface(query)
+        d_xyz, d_emb, d_rest = self._embed_surface(data)
+        q_normal, q_sharp = q_rest.split([3, 1], dim=-1)
+        d_normal, d_sharp = d_rest.split([3, 1], dim=-1)
+
+        q_normal = torch.nn.functional.normalize(q_normal, dim=-1)
+        d_normal = torch.nn.functional.normalize(d_normal, dim=-1)
+        
+        q_emb = torch.cat([q_emb, q_sharp], dim=-1)
+        d_emb = torch.cat([d_emb, d_sharp], dim=-1)
+
+        sdf_query_points = self.fourier_embedder(qp)   # xyz only
+
+        return q_xyz, d_xyz, q_normal, d_normal, q_emb, d_emb, sdf_query_points, gt
+
+    def frame_sample(self, cache: dict):
+        # FrameEncoder's query is 100% importance points -- unlike double_stream_sample, the uniform
+        # branch's query FPS is never computed here (FrameEncoder discards it, so computing it would
+        # be a wasted FPS pass + embedding). The KV/data side is unchanged: both cross-attention
+        # branches still read their own downsampled pool.
+        surf = self.mesh2query.downsample(cache["surface_pool"], self.downsample_ratio * self.random_sample_count)
+        sharp = self.mesh2query.downsample(cache["sharp_pool"], self.downsample_ratio * self.important_sample_count)
+        sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
+
+        query = sharp_fps                                 # (important = num_latents, 7)
+        data = torch.cat([surf, sharp], dim=0)             # (downsample_ratio * (random + important), 7)
+
+        qp = cache["sdf_query_points"]
+        gt = cache["gt_sdf"]
+        if self.sdf_subset is not None and self.sdf_subset < qp.shape[0]:
+            idx = torch.randperm(qp.shape[0])[: self.sdf_subset]
+            qp, gt = qp[idx], gt[idx]
+
+        q_xyz, q_emb, q_rest = self._embed_surface(query)
+        d_xyz, d_emb, d_rest = self._embed_surface(data)
+        q_normal, q_sharp = q_rest.split([3, 1], dim=-1)
+        d_normal, d_sharp = d_rest.split([3, 1], dim=-1)
+
+        q_normal = torch.nn.functional.normalize(q_normal, dim=-1)
+        d_normal = torch.nn.functional.normalize(d_normal, dim=-1)
+
+        q_emb = torch.cat([q_emb, q_sharp], dim=-1)
+        d_emb = torch.cat([d_emb, d_sharp], dim=-1)
+
+        sdf_query_points = self.fourier_embedder(qp)   # xyz only
+
+        return q_xyz, d_xyz, q_normal, d_normal, q_emb, d_emb, sdf_query_points, gt
+
+    def _embed_surface(self, pts: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # pts: (L, in_channels) = [xyz(3) | normal(in_channels-3)]; Fourier acts on xyz only.
         xyz, normal = pts.split([3, pts.shape[-1] - 3], dim=-1)
-        return torch.cat([self.fourier_embedder(xyz), normal], dim=-1)
+        return xyz, self.fourier_embedder(xyz), normal
+
 
     # ---- heavy mode (on the fly) ----
     def forward(self, mesh_path: str):

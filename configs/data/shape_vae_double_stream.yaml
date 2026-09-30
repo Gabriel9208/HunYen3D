@@ -1,0 +1,32 @@
+# Same meshes and same cache as shape_vae.yaml, but the dataset calls
+# Preprocessor.double_stream_sample: coords, normals and the Fourier embedding come out as separate
+# tensors instead of one concatenated 55-wide block. The cache files are identical — no rebuild.
+batch_size: 1
+num_workers: 8
+
+train:
+  dataset:
+    _target_: src.engine.data.DoubleStreamVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/train
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+
+val:
+  dataset:
+    _target_: src.engine.data.DoubleStreamVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/val
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+
+test:
+  dataset:
+    _target_: src.engine.data.DoubleStreamVAEDataset
+    obj_root: ${hydra:runtime.cwd}/data/test
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache   # same flat cache (split-agnostic)
