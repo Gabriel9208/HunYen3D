@@ -29,7 +29,8 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from src.engine.utils import get_device, set_seed
-from src.metrics import SIOU, VIOU, ChamferDistance, FScore, NormalConsistency
+from src.metrics import (BandedSDFMetrics, SIOU, VIOU, ChamferDistance, FScore, NormalConsistency,
+                         ULIPMetric, Uni3DMetric)
 
 _SURF_SAMPLES = 50_000  # ponytail: surface points per cloud for chamfer/f-score/NC; stable yet cheap
 
@@ -39,6 +40,7 @@ def _viz_setup(cfg: DictConfig, ds):
 
     Returns a namespace with `post`, `renderer`, `out` (results dir) and the `load_gt` /
     `save_pair` helpers (moved here from the old viz_recon.py)."""
+    import glob
     import gzip
     from types import SimpleNamespace
 
@@ -101,10 +103,23 @@ def _viz_setup(cfg: DictConfig, ds):
         pts, fi = trimesh.sample.sample_surface(mesh, n)
         return np.asarray(pts), np.asarray(mesh.face_normals[fi])
 
+    render_root = cfg.get("render_dir", "data/rendered")  # ULIP-I/Uni3D-I reference renders
+    if not os.path.isabs(render_root):
+        render_root = os.path.join(get_original_cwd(), render_root)
+
+    def load_renders(rel: str, split: str):
+        """All rendered views for a model_id -> list[PIL.Image] | None (missing dir → N/A).
+        rel is '<cat>/4_watertight_scaled/<id>'; renders live at <root>/<split>/<cat>/<id>/rendering/."""
+        d = os.path.join(render_root, split, rel.split(os.sep)[0], os.path.basename(rel), "rendering")
+        if not os.path.isdir(d):
+            return None
+        paths = sorted(glob.glob(os.path.join(d, "*.png")))
+        return [Image.open(p).convert("RGB") for p in paths] or None
+
     out = os.path.join(get_original_cwd(), "results", cfg.get("name", "recon"))  # project root, not the hydra run dir
     post = Postprocess(ds.preprocessor.fourier_embedder, resolution=int(cfg.get("resolution", 128)))
     return SimpleNamespace(post=post, renderer=renderer, out=out, load_gt=load_gt,
-                           save_pair=save_pair, sample_pn=sample_pn)
+                           save_pair=save_pair, sample_pn=sample_pn, load_renders=load_renders)
 
 
 def _preflight(cfg: DictConfig) -> None:
@@ -134,6 +149,21 @@ def _preflight(cfg: DictConfig) -> None:
         raise SystemExit(f"fscore_tau={fscore_tau} must exceed MC cell size 2/{resolution}"
                          f"={2 / resolution:.4f}, else it scores below discretisation noise")
 
+    # ULIP-I / Uni3D-I: score the extracted recon mesh vs the model_id's GT renders → need +viz.
+    for key in ("ulip_ckpt", "uni3d_ckpt"):
+        if key in cfg:
+            p = cfg[key] if os.path.isabs(cfg[key]) else os.path.join(get_original_cwd(), cfg[key])
+            if not os.path.isfile(p):
+                raise SystemExit(f"{key} not found: {p}")
+            cfg[key] = p
+            if not bool(cfg.get("viz", False)):
+                raise SystemExit(f"{key} needs +viz=true (ULIP/Uni3D score the extracted recon mesh)")
+    if "ulip_ckpt" in cfg or "uni3d_ckpt" in cfg:
+        rd = cfg.get("render_dir", "data/rendered")
+        rd = rd if os.path.isabs(rd) else os.path.join(get_original_cwd(), rd)
+        if not os.path.isdir(rd):
+            raise SystemExit(f"render_dir not found (needed for ULIP-I/Uni3D-I): {rd}")
+
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
@@ -145,8 +175,21 @@ def main(cfg: DictConfig) -> None:
 
     ds = instantiate(cfg.data[cfg.get("split", "val")].dataset)
     n = min(int(cfg.get("shapes", 16)), len(ds))
+    # +stratified=true strides over the category-sorted dataset so a subset spans all categories, instead of
+    # taking the first n (all one category). Default false → unchanged (first n).
+    if bool(cfg.get("stratified", False)):
+        step = max(1, len(ds) // n)
+        idxs = list(range(0, len(ds), step))[:n]
+    else:
+        idxs = list(range(n))
+    n = len(idxs)
     viz = bool(cfg.get("viz", False))
     v = _viz_setup(cfg, ds) if viz else None
+
+    # Learned image-alignment metrics (heavy, on demand): built only when a ckpt is given, else None
+    # → the loop below stays exactly as it was for plain reconstruction eval.
+    ulip_metric = ULIPMetric(ckpt=cfg.ulip_ckpt, device=str(device)) if "ulip_ckpt" in cfg else None
+    uni3d_metric = Uni3DMetric(ckpt=cfg.uni3d_ckpt, device=str(device)) if "uni3d_ckpt" in cfg else None
 
     # +samples=K averages K decoded fields from z~N(mu,sigma) instead of decode(mu). Discriminates
     # posterior collapse (sample-avg still bad → info gone) from mu being an off-manifold point
@@ -158,6 +201,7 @@ def main(cfg: DictConfig) -> None:
     fscore_tau = float(cfg.get("fscore_tau", 0.02))
     preds, gts = [], []
     chamfers, fscores, ncs = [], [], []  # per-shape mesh metrics (only shapes with an extracted surface)
+    ulips, uni3ds = [], []               # per-shape ULIP-I / Uni3D-I (only when the ckpt is given)
     no_surface = 0
     mu_vecs, sig_rms = [], []  # per-shape flattened mu and rms(sigma): mu-spread=collapse, sigma=shell size
     # Volume V-IoU (paper protocol): occupancy IoU over uniform-in-volume points. sample() shuffles+subsets
@@ -167,7 +211,7 @@ def main(cfg: DictConfig) -> None:
     vol_pts = int(cfg.get("vol_pts", 16384))   # uniform pts decoded per shape for the volume-IoU
     vol_preds, vol_gts = [], []
     with torch.no_grad():
-        for i in range(n):
+        for i in idxs:
             it = ds[i]
             q = it["query"].unsqueeze(0).to(device)
             data = it["data"].unsqueeze(0).to(device)
@@ -218,8 +262,17 @@ def main(cfg: DictConfig) -> None:
                     fs = FScore(tau=fscore_tau)(rp, gp)
                     nc = NormalConsistency()(rp, rn, gp, gn)
                     chamfers.append(cd); fscores.append(fs); ncs.append(nc)
+                    extra = ""
+                    if ulip_metric or uni3d_metric:
+                        imgs = v.load_renders(rel, cfg.get("split", "val"))  # None → renders missing → N/A
+                        if ulip_metric:
+                            u = ulip_metric(recon, imgs) if imgs else float("nan")
+                            ulips.append(u); extra += f"  ULIP-I={u:.4f}"
+                        if uni3d_metric:
+                            u3 = uni3d_metric(recon, imgs) if imgs else float("nan")
+                            uni3ds.append(u3); extra += f"  Uni3D-I={u3:.4f}"
                     print(f"[{i}] {rel}  verts={len(recon.vertices)}  chamfer={cd:.5f}  "
-                          f"f-score={fs:.4f}  NC={nc:.4f}")
+                          f"f-score={fs:.4f}  NC={nc:.4f}{extra}")
 
     import math
     import statistics as _st
@@ -239,6 +292,10 @@ def main(cfg: DictConfig) -> None:
         good = [x for x in vals if not math.isnan(x)]
         return f"N/A (0/{n} shapes)" if not good else f"{sum(good) / len(good):.5f}  ({len(good)}/{n} shapes)"
 
+    def _num(vals: list[float]):  # numeric mean over shapes with a surface, or None (JSON-friendly)
+        good = [x for x in vals if not math.isnan(x)]
+        return sum(good) / len(good) if good else None
+
     mode = f"sample-avg K={K}" if K > 0 else "mu-path"
     print(f"\nshapes={n}  points={gt.numel():,}  eval={mode}  ckpt={cfg.ckpt}")
     mu_spread = torch.stack(mu_vecs).std(0).mean().item()  # per-elem std across shapes, averaged
@@ -250,14 +307,37 @@ def main(cfg: DictConfig) -> None:
     print(f"V-IoU (all pts)  : {_iou_str(v_iou)}  [our default: ~80% near-surface]")
     print(f"V-IoU (uniform)  : {_iou_str(v_iou_uniform)}  [paper volume-IoU: {min(n_uni, vol_pts)} uniform-in-vol pts/shape]")
     print(f"S-IoU (|gt|<0.02): {_iou_str(s_iou)}")
+    # Fine-band RMS. S-IoU's |gt|<0.02 band is wider than a res-128 MC cell, so it averages the
+    # detail question away; the <0.005 band is where posterior noise shows up as smoothing.
+    _FINE = [(0.0, 0.005, "<0.005"), (0.005, 0.02, "0.005-0.02"), (0.02, 0.1, "0.02-0.1"), (0.1, 9.9, ">0.1")]
+    for _nm, _b in BandedSDFMetrics(_FINE)(pred, gt)["bands"].items():
+        print(f"  band |gt| {_nm:>10}: rms={_b['rms']:.5f}  rms_ratio={_b['rms_ratio']:.4f}  "
+              f"({_b['frac']:.1f}% of pts)")
     if viz:
         print(f"chamfer          : {_mesh_agg(chamfers)}   (no surface {no_surface}/{n} → N/A)")
         print(f"f-score@{fscore_tau:g}     : {_mesh_agg(fscores)}")
         print(f"normal-consist.  : {_mesh_agg(ncs)}")
+        if ulip_metric:
+            print(f"ULIP-I           : {_mesh_agg(ulips)}   (recon-shape ↔ GT-render alignment, ↑)")
+        if uni3d_metric:
+            print(f"Uni3D-I          : {_mesh_agg(uni3ds)}   (recon-shape ↔ GT-render alignment, ↑)")
         v.renderer.delete()
         print(f"\nviz → {v.out}/  (PNG left=GT right=recon)")
     else:
         print("chamfer/f-score/NC: add +viz=true to extract meshes and compute these")
+
+    if cfg.get("json_out"):  # machine-readable summary for aggregation (scripts/final_eval.py)
+        import json
+        rec = {"experiment": cfg.get("name"), "ckpt": cfg.ckpt, "split": cfg.get("split", "val"),
+               "n": n, "K": K, "viz": viz,
+               "v_iou_all": None if math.isnan(v_iou) else v_iou,
+               "v_iou_uniform": None if math.isnan(v_iou_uniform) else v_iou_uniform,
+               "s_iou": None if math.isnan(s_iou) else s_iou, "mu_spread": mu_spread,
+               "chamfer": _num(chamfers), "fscore": _num(fscores), "nc": _num(ncs)}
+        os.makedirs(os.path.dirname(os.path.abspath(cfg.json_out)), exist_ok=True)
+        with open(cfg.json_out, "w") as f:
+            json.dump(rec, f, indent=2)
+        print(f"json → {cfg.json_out}")
 
 
 if __name__ == "__main__":
