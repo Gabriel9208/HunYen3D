@@ -1,0 +1,53 @@
+# @package _global_
+# Scaling ladder rung XS (~140M), rope-VAE arm. Inherits dit_baseline directly (NOT dit_xs_base --
+# that file's task.vae is an AnchorVAE block; OmegaConf deep-merges dicts key-by-key, so overriding
+# task.vae on top of it would leak AnchorVAE-only keys like num_anchor_layers into RoPEVAE's kwargs.
+# dit_xs_anchor sidesteps the same trap by inheriting dit_anchor_selfcond instead of dit_xs_base).
+# So this file re-applies the xs rung's size/throughput overrides itself, matching dit_xs_base's
+# values exactly, and the only real variable against dit_xs_base is which VAE's latents get diffused.
+#
+# Context (2026-08-18/19): this VAE reached 77.4% attention locality against the vanilla baseline's
+# 53.4% at a matched epoch, but tied on the test split (V-IoU all 74.88 vs 75.53, uniform 91.14 vs
+# 91.34, S-IoU 67.49 vs 68.57 -- see results/rope_eval/). The checkpoint below is the same arm carried
+# through the lr3.5e-6 settle stage (mirrors vae_converge_kl1e-4_lr3.5e-6, which dit_xs_base's VAE
+# came from). This run answers what the VAE-level tie leaves open: does RoPE change anything about
+# the latents' suitability for DiT to diffuse, independent of reconstruction quality.
+# Launch:  +experiment=dit_xs_base_rope_vae
+defaults:
+  - dit_baseline
+  - override /model: mm_dit_xs
+  - _self_
+
+task:
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/vae_rope_kl1e-4_lr3.5e-6_1024_l8_16/2026-08-18_16-36-48/checkpoints/best.pt
+
+  # Must match the checkpoint's architecture exactly (task.py:130 loads strict=True).
+  # enable_self_atten_rope stays at its default False: this VAE's line (vae_rope_kl1e-4_1024_l8_16 ->
+  # ..._lr3.5e-6) only ever rotated the cross-attention q/k, never the encoder self-attention layers.
+  vae:
+    _target_: src.model.shape.VAE.vae.RoPEVAE
+    num_latents: 1024
+    encoder_pe_dim: 55
+    decoder_pe_dim: 51
+    latent_dim: 64
+    width: 1024
+    num_head: 16
+    num_encoder_layers: 8
+    num_decoder_layers: 16
+    rope_theta: 10000
+    rope_axes_dim: [22, 22, 20]
+    rope_coord_scale: 22.3
+
+data:
+  batch_size: 8         # matches dit_xs_base exactly (see its comment on GEMM size / GPU utilisation)
+
+trainer:
+  grad_accum_steps: 4   # effective batch stays 32, matches dit_xs_base
+
+wandb:
+  name: dit_xs_base_rope_vae
+  tags: [dit, flow-matching, mm-dit, dinov2, xs, ladder, rope-vae]
+
+hydra:
+  run:
+    dir: outputs/dit_xs_base_rope_vae/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,13 +1,3 @@
-"""Smoke test: run a few real train steps, confirm no OOM, finite loss, and print peak VRAM.
-
-Exercises the full training path (encode → decode → backward → optimizer.step) on real cache
-data, so it directly verifies whether memory settings like sdf_subset / bf16 fit.
-
-Usage:
-  uv run python scripts/smoke_test.py +experiment=base_first_train
-  uv run python scripts/smoke_test.py +experiment=base_first_train steps=5
-"""
-
 from __future__ import annotations
 
 import os
@@ -47,8 +37,8 @@ def main(cfg: DictConfig) -> None:
         out.loss.backward()
         optimizer.step()
         assert torch.isfinite(out.loss), f"step {i}: loss is not finite {out.loss}"
-        print(f"step {i}: loss={out.loss.item():.4f} "
-              f"recon={out.metrics['recon']:.4f} kl={out.metrics['kl']:.4f}")
+        metrics_str = " ".join(f"{k}={v:.4f}" for k, v in out.metrics.items())
+        print(f"step {i}: loss={out.loss.item():.4f} {metrics_str}")
 
     if device.type == "cuda":
         peak = torch.cuda.max_memory_allocated() / 1024 ** 3
@@ -58,3 +48,8 @@ def main(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     main()
+
+"""
+  uv run python scripts/smoke_test.py +experiment=base_first_train
+  uv run python scripts/smoke_test.py +experiment=base_first_train steps=5
+"""

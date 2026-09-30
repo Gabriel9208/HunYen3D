@@ -1,9 +1,3 @@
-# Flow-matching MM-DiT denoiser. Predicts velocity on VAE latents conditioned on image features.
-#   latent_in_dim = VAE latent_dim (64); latent token count = VAE num_latents (1024).
-#   cond_in_dim   = DINOv2-Giant feature dim (1536); cond token count is arbitrary (DoubleStream
-#                   handles any length), so DINO patch tokens need no resampling.
-# NB: latent_in_dim MUST equal out_channel — the sampler integrates x = x + v, so the predicted
-#     velocity must share the latent's channel dim.
 _target_: src.model.shape.diffusion.MM_DiT.MM_DiT
 double_stream_layers: 16
 single_stream_layers: 32
@@ -14,6 +8,14 @@ drop_prob: 0.0
 in_channel: 64
 out_channel: 64
 latent_in_dim: 64
-cond_in_dim: 1536
+cond_in_dim: 1024
 time_in_dim: 256
 time_factor: 1000
+use_anchor: false
+rope_theta: 10000
+rope_axes_dim: [22, 22, 20]
+rope_coord_scale: 4.0
+
+# Activation checkpointing on every DiT block: recompute activations in backward instead of storing
+# them. ~30% slower, but the 1.1B DiT + on-the-fly VAE encode is at the 16GB edge without it.
+use_checkpoint: true

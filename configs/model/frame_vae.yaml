@@ -1,0 +1,12 @@
+_target_: src.model.shape.VAE.vae.FrameVAE
+num_latents: 512   # final z length = sharp query count, NOT the preprocessing split total
+encoder_pe_dim: 52
+decoder_pe_dim: 51
+latent_dim: 64
+width: 1024
+num_head: 16
+num_encoder_layers: 8
+num_decoder_layers: 16
+rope_theta: 10000
+rope_axes_dim: [22, 22, 20]
+rope_coord_scale: 22.3

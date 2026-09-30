@@ -15,11 +15,11 @@ model:
   detach_anchor: true         # the only difference vs anchor_baseline_1024_l8_16
 
 optimizer:
-  lr: 3e-4
+  lr: 3.5e-5
   weight_decay: 0
-
+ 
 task:
-  kl_weight: 1e-4
+  kl_weight: 1e-3
   anchor_chamfer_weight: 1.0   # 主, same as the non-detach arm
   anchor_mse_weight: 0.1       # 輔, same as the non-detach arm
   recon_loss:

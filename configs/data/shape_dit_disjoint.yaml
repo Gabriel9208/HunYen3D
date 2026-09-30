@@ -1,0 +1,35 @@
+# Same as shape_dit.yaml, but the dataset calls Preprocessor.sample_disjoint() (sharp FPS picked
+# first, uniform/surface FPS seeded to avoid it) instead of plain sample() -- matches the query
+# distribution the frozen VAE checkpoint was actually trained on.
+batch_size: 1
+num_workers: 8
+
+train:
+  dataset:
+    _target_: src.engine.data.MeshCondDisjointDataset
+    obj_root: ${hydra:runtime.cwd}/data/train
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: /data/cache_dino
+
+val:
+  dataset:
+    _target_: src.engine.data.MeshCondDisjointDataset
+    obj_root: ${hydra:runtime.cwd}/data/val
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: /data/cache_dino
+
+test:
+  dataset:
+    _target_: src.engine.data.MeshCondDisjointDataset
+    obj_root: ${hydra:runtime.cwd}/data/test
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: /data/cache_dino

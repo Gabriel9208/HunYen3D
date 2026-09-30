@@ -1,0 +1,16 @@
+_target_: src.model.shape.VAE.vae.DoubleStreamVAE
+num_latents: 1024
+encoder_pe_dim: 52
+decoder_pe_dim: 51
+latent_dim: 64
+width: 1024
+num_head: 16
+num_encoder_layers: 8
+num_decoder_layers: 16
+rope_theta: 10000
+rope_axes_dim: [22, 22, 20]  
+# 22.3 = 1 / 0.04483, the mean nearest-neighbour distance among the 1024 FPS points measured over
+# the whole cache (52471 shapes, scripts/fps_spacing.py -> results/fps_spacing.json). One point
+# spacing becomes one unit, so the fastest frequency pair turns ~1 rad between neighbours — the
+# regime NLP RoPE works in, and the one TRELLIS.2 gets for free by feeding integer voxel indices.
+rope_coord_scale: 22.3

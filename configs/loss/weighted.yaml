@@ -1,3 +1,8 @@
 _target_: src.engine.task.WeightedSDFLoss
 near_weight: 4.0   # λ: extra near-surface weight
 near_beta: 30.0    # β: how fast the weight decays with |sdf|; 0 degenerates to unweighted MSE
+exp: 2.0           # error exponent: 2 = MSE, 1 = MAE, 0.5 = sqrt. Below 2 the loss stops being
+                   # mean-seeking (which is what blurs detail) and starts being mode-seeking,
+                   # at the cost of pulling much less on the worst-fitted points. MRLVAETask
+                   # overrides this per m via task.m_exponents; every other task uses it as-is.
+eps: 1e-4           # Charbonnier smoothing; must be > 0 (try 1e-3) for any exp < 1, free at exp=2

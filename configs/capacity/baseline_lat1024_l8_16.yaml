@@ -15,3 +15,4 @@ data:
   batch_size: 2
 trainer:
   grad_accum_steps: 16     # 2 × 16 = effective 32 (conservative for the deep dec16; bump batch if VRAM allows)
+ 

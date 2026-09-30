@@ -1,0 +1,25 @@
+# @package _global_
+# SIGReg (LeJEPA) applied to MU, added on top of an unchanged KL term. A/B partner is
+# vae_disjoint_converge_kl1e-4_1024_l8_16; the ONLY difference is the extra sig_weight*SIGReg(mu).
+# The KL term stays because SIGReg cannot hold the latent's scale -- dropping it diverges (z_std
+# reached 181 at sig 1e-2). Why mu and not z, the saturation measurements and the 240-step
+# sig_weight verification: docs/RESEARCH_LOG.md -> "SIGReg (LeJEPA) as a latent regulariser".
+
+# Launch:  +experiment=vae_sigreg_mu_disjoint_converge_1024_l8_16
+defaults:
+  - vae_disjoint_converge_kl1e-4_1024_l8_16
+  - _self_
+
+task:
+  enable_sig: true
+  sig_weight: 1.0e-4
+  kl_weight: 1.0e-4     # unchanged from the A/B partner: scale anchor, not the thing under test
+  deterministic: false  # posterior sampling kept, as in 3DShape2VecSet and Hunyuan3D-2.1
+
+wandb:
+  name: vae_sigreg_mu_disjoint_converge_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps, sigreg, sigreg-mu, lejepa]
+
+hydra:
+  run:
+    dir: outputs/vae_sigreg_mu_disjoint_converge_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

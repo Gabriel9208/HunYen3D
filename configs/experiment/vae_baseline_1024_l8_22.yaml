@@ -15,11 +15,11 @@ model:
   num_decoder_layers: 22    # 16 + 6: the only change vs the l8_16 baseline
 
 optimizer:
-  lr: 3e-4
+  lr: 3.5e-5
   weight_decay: 0
 
 task:
-  kl_weight: 1e-4
+  kl_weight: 1e-3
   recon_loss:
     near_beta: 0             # plain unweighted MSE
 

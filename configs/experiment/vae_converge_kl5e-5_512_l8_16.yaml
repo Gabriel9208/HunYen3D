@@ -1,0 +1,21 @@
+# @package _global_
+# Rerun of vae_converge_1024_l8_16 with the KL weight relaxed 10x (1e-3 -> 1e-4). The 1e-3 run's
+# posterior was over-regularised: KL dominated the objective, so mu collapsed toward the prior and
+# the latent carried too little shape information for the DiT to condition on. Everything else
+# (capacity, constant 3.5e-5 LR, plain MSE, infinite epochs, from scratch) is inherited unchanged,
+# so this is a clean single-knob A/B against the 1e-3 run.
+# Launch:  +experiment=vae_converge_kl1e-4_1024_l8_16
+defaults:
+  - vae_converge_512_l8_16
+  - _self_
+
+task:
+  kl_weight: 5e-5
+
+wandb:
+  name: vae_converge_kl5e-5_512_l8_16
+  tags: [baseline, vae, lat512, deep, kl5e-5, converge, constant-lr]
+
+hydra:
+  run:
+    dir: outputs/vae_converge_kl5e-5_512_l8_16/${now:%Y-%m-%d_%H-%M-%S}

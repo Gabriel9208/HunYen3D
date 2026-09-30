@@ -1,0 +1,35 @@
+# @package _global_
+# Continuation of vae_converge_kl1e-4_1024_l8_16 with the LR dropped 10x (3.5e-5 -> 3.5e-6) to settle the
+# constant-LR plateau (RESEARCH_LOG Stage-1: constant LR floors at the SGD noise ball; a lower LR settles
+# closer). Mirrors what vae_converge_lr3.5e-6_1024_l8_16 did for the kl1e-3 arm, so the two lr3.5e-6 runs
+# stay a clean single-knob (kl) A/B. The _resume lr-override (runner.py, scheduler-less branch) makes this
+# config's lr win over the checkpoint's stored 3.5e-5. New wandb id + new hydra dir, so the source run's
+# checkpoints are never overwritten.
+# Launch:  +experiment=vae_converge_kl1e-4_lr3.5e-6_1024_l8_16
+defaults:
+  - vae_converge_kl1e-4_1024_l8_16
+  - _self_
+
+optimizer:
+  lr: 3.5e-6                    # 10x lower than the source run's 3.5e-5
+
+trainer:
+  # NOTE: best.pt, not last.pt (the kl1e-3 arm resumed from last.pt). Chosen deliberately — resume from
+  # the checkpoint with the best val, not merely the most recent one.
+  resume: /home/gabriel/dev/HunYen3D/outputs/vae_converge_kl1e-4_1024_l8_16/2026-08-11_11-46-56/checkpoints/best.pt
+  # Select best.pt on reconstruction quality, not on the KL-inclusive training objective. val/loss
+  # (the trainer default this used to inherit) also rewards a small KL, i.e. a less informative
+  # latent -- the exact thing this research line is trying to avoid. It also left this run selecting
+  # on a different quantity from its own A/B partners vae_disjoint_converge_* and
+  # vae_lambda_disjoint_converge_*, which both use val/viou; that made the paper table compare
+  # checkpoints chosen by two different rules.
+  best_metric_key: val/viou
+  best_metric_mode: max
+
+wandb:
+  name: vae_converge_kl1e-4_lr3.5e-6_1024_l8_16
+  tags: [baseline, vae, lat1024, deep, kl1e4, converge, constant-lr, lr3.5e-6, resume]
+
+hydra:
+  run:
+    dir: outputs/vae_converge_kl1e-4_lr3.5e-6_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

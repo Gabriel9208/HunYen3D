@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Training run artifacts
-outputs/
+outputs
 results/
 multirun/
 checkpoints/
@@ -18,3 +18,12 @@ checkpoints/
 ref/
 /data/
 /cache/
+logs/
+third_party/
+weights/
+
+# Running lab notebook — kept local, not published
+docs/RESEARCH_LOG.md
+docs/RESEARCH_LOG.zh.md
+docs/writeup/RESEARCH_LOG.md
+docs/writeup/RESEARCH_LOG.zh.md

@@ -1,0 +1,25 @@
+# @package _global_
+# Split-attention encoder on top of disjoint sampling. The 1024 query tokens are uniform-first,
+# sharp-second (preprocess.py:395), and the 20480 KV points are ordered the same way
+# (preprocess.py:396), so the masked blocks split both at the halfway point: uniform tokens attend
+# to everything, sharp tokens attend to sharp only. Two unmasked "mix" layers (one mid-stack, one
+# last) are the sole path by which uniform context reaches the sharp tokens.
+#
+# The A/B partner is vae_disjoint_converge_kl1e-4_1024_l8_16 -- same data, same kl_weight, same
+# constant LR, same best-metric. Only the encoder's attention pattern differs, and the block count
+# matches it exactly (1 cross + 3 + mix + 3 + mix = 9, vs 1 cross + 8 self = 9), so a win here is
+# attributable to the mask rather than to added capacity.
+
+# Launch:  +experiment=masked_vae_converge_kl1e-4_1024_l8_16
+defaults:
+  - vae_disjoint_converge_kl1e-4_1024_l8_16
+  - override /model: masked_vae
+  - _self_
+
+wandb:
+  name: masked_vae_converge_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps, masked-attn]
+
+hydra:
+  run:
+    dir: outputs/masked_vae_converge_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

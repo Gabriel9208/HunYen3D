@@ -3,7 +3,10 @@
 # Set vae_ckpt to a trained VAE checkpoint (.pt with a "model" state_dict); the nested `vae`
 # architecture MUST match that checkpoint (the converge VAE uses num_latents=1024).
 _target_: src.engine.task.FlowMatchingTask
-vae_ckpt: ???   # required: path to trained VAE .pt (override on launch)
+vae_ckpt: ???       # required: path to trained VAE .pt (override on launch)
+cond_dropout: 0.1   # CFG: fraction of training samples with cond dropped to null; 0 disables CFG
+self_cond: false    # anchor self-conditioning (2-pass). true requires an AnchorVAE + model.use_anchor=true
+eval_t: [0.3, 0.5, 0.7]  # fixed t levels for the val z*-decode v-iou/s-iou metric (logged per-t + mean)
 flow:
   _target_: src.model.shape.diffusion.flow_matching.FlowMatching
   std: 1.0

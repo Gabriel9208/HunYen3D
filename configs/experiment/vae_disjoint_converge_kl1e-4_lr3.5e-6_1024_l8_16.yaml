@@ -1,0 +1,20 @@
+# @package _global_
+defaults:
+  - vae_disjoint_kl1e-4_1024_l8_16
+  - _self_
+
+
+optimizer:
+  lr: 3.5e-6   
+
+trainer:
+  best_metric_key: val/viou
+  best_metric_mode: max
+
+wandb:
+  name: vae_disjoint_converge_kl1e-4_lr3.5e-6_1024_l8_16
+  tags: [baseline, vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps]
+
+hydra:
+  run:
+    dir: outputs/vae_disjoint_converge_kl1e-4_lr3.5e-6_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,0 +1,27 @@
+# @package _global_
+# MRL warm-started from the fully-trained disjoint VAE (lr 3.5e-5 converge run, last.pt @ epoch 39).
+# The A/B partner is mrl_vae_converge_kl1e-4_1024_l8_16, which is identical except it starts from
+# scratch. Question this run answers: does a representation that already spreads information across
+# all 64 channels KEEP its tail under MRL fine-tuning, or does the objective squeeze it into the
+# prefix anyway? A from-scratch collapse can be dismissed as "never learned them"; a collapse from
+# here cannot.
+#
+# Expect m<64 to start near chance: the loaded decoder's proj_latent was trained on all 64 channels,
+# so slicing its weight columns breaks the shorter truncations until they retrain. Only m=64 inherits
+# the pretrained quality.
+
+# Launch:  +experiment=mrl_vae_warm_disjoint_kl1e-4_1024_l8_16
+defaults:
+  - mrl_vae_converge_kl1e-4_1024_l8_16
+  - _self_
+
+trainer:
+  init_from: ${hydra:runtime.cwd}/outputs/vae_disjoint_converge_kl1e-4_1024_l8_16/2026-08-29_15-56-38/checkpoints/last.pt
+
+wandb:
+  name: mrl_vae_warm_disjoint_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e-4, converge, constant-lr, mrl, disjoint-fps, warm-start]
+
+hydra:
+  run:
+    dir: outputs/mrl_vae_warm_disjoint_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

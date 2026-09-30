@@ -1,0 +1,22 @@
+# @package _global_
+# Converge-family variant of vae_disjoint_kl1e-4_1024_l8_16 (disjoint FPS: sharp picked first,
+# uniform/surface FPS seeded to avoid it) -- best.pt selected by val/viou (higher is better)
+# instead of the VAE default val/loss, since the point of this run is reconstruction quality,
+# not the KL-inclusive training objective (same reasoning DiT configs already use for
+# val/viou_full_ode+max; see configs/trainer/default.yaml's best_metric_key/mode comment).
+# Launch:  +experiment=vae_disjoint_converge_kl1e-4_1024_l8_16
+defaults:
+  - vae_disjoint_kl1e-4_1024_l8_16
+  - _self_
+
+trainer:
+  best_metric_key: val/viou
+  best_metric_mode: max
+
+wandb:
+  name: vae_disjoint_converge_kl1e-4_1024_l8_16
+  tags: [baseline, vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps]
+
+hydra:
+  run:
+    dir: outputs/vae_disjoint_converge_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

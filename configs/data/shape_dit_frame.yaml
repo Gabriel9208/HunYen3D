@@ -1,0 +1,35 @@
+# Same as shape_dit.yaml, but the dataset calls Preprocessor.frame_sample and returns
+# q_xyz/d_xyz/q_emb/d_emb batch keys (FrameVAE's encode() signature) instead of the plain VAE's
+# query/data keys. Pairs with a task.vae override that targets FrameVAE.
+batch_size: 1
+num_workers: 8
+
+train:
+  dataset:
+    _target_: src.engine.data.MeshCondFrameDataset
+    obj_root: ${hydra:runtime.cwd}/data/train
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: /data/cache_dino
+
+val:
+  dataset:
+    _target_: src.engine.data.MeshCondFrameDataset
+    obj_root: ${hydra:runtime.cwd}/data/val
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: /data/cache_dino
+
+test:
+  dataset:
+    _target_: src.engine.data.MeshCondFrameDataset
+    obj_root: ${hydra:runtime.cwd}/data/test
+    preprocessor: ${preprocess}
+    pattern: "*.off.gz"
+    mode: light
+    cache_dir: ${hydra:runtime.cwd}/cache
+    cond_dir: /data/cache_dino

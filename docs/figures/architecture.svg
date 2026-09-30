@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="920" viewBox="0 0 1600 920"
+     font-family="Helvetica, Arial, sans-serif">
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#333"/>
+  </marker>
+  <marker id="ahd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" fill="#8a8a8a"/>
+  </marker>
+  <style>
+    .bx  { stroke-width:1.3; }
+    .blue   { fill:#dbe8f5; stroke:#5b87b5; }
+    .orange { fill:#fae3cd; stroke:#d08a45; }
+    .grey   { fill:#eeeeee; stroke:#888888; }
+    .purple { fill:#e7dff1; stroke:#8c72ab; }
+    .green  { fill:#dcecdc; stroke:#6a9c6a; }
+    .white  { fill:#ffffff; stroke:#666666; }
+    .lbl  { font-size:13px; fill:#1a1a1a; text-anchor:middle; }
+    .sub  { font-size:10.5px; fill:#666666; text-anchor:middle; }
+    .tag  { font-size:10px; fill:#444444; text-anchor:middle; }
+    .hdr  { font-size:15px; fill:#1a1a1a; text-anchor:middle; font-weight:600; }
+    .pan  { font-size:19px; fill:#000000; font-weight:700; }
+    .ar   { stroke:#333333; stroke-width:1.3; fill:none; marker-end:url(#ah); }
+    .ard  { stroke:#8a8a8a; stroke-width:1.2; fill:none; stroke-dasharray:5 3; marker-end:url(#ahd); }
+    .gd   { stroke:#c8c8c8; stroke-width:1; fill:none; stroke-dasharray:4 4; }
+  </style>
+</defs>
+<rect width="1600" height="920" fill="#ffffff"/>
+
+<!-- ============================ PANEL (a) ============================ -->
+<text class="pan" x="28" y="52">(a)</text>
+<text class="hdr" x="150" y="52" text-anchor="start">Disjoint query sampling</text>
+
+<!-- mesh -->
+<rect class="bx white" x="40" y="188" width="96" height="72" rx="5"/>
+<path d="M40,224 L136,224 M88,188 L88,260 M40,188 L136,260 M136,188 L40,260" stroke="#aaaaaa" stroke-width="0.9" fill="none"/>
+<text class="sub" x="88" y="278">Watertight mesh</text>
+<text class="sub" x="88" y="291">[-1,1]³</text>
+
+<path class="ar" d="M136,210 L176,152"/>
+<path class="ar" d="M136,238 L176,296"/>
+
+<!-- pools -->
+<rect class="bx blue"   x="178" y="120" width="150" height="58" rx="5"/>
+<text class="lbl" x="253" y="144">Surface pool</text>
+<text class="sub" x="253" y="162">81,920 pts</text>
+<rect class="bx orange" x="178" y="270" width="150" height="58" rx="5"/>
+<text class="lbl" x="253" y="294">Sharp pool</text>
+<text class="sub" x="253" y="312">81,920 pts</text>
+<text class="tag" x="253" y="348">point = xyz(3) + normal(3)</text>
+<text class="tag" x="253" y="361">+ sharp flag(1)</text>
+
+<path class="ar" d="M328,149 L392,149"/>
+<path class="ar" d="M328,299 L392,299"/>
+<text class="tag" x="360" y="140">random</text>
+<text class="tag" x="354" y="292">random</text>
+
+<!-- downsampled -->
+<rect class="bx blue"   x="394" y="128" width="92" height="42" rx="5"/>
+<text class="lbl" x="440" y="154">10,240</text>
+<rect class="bx orange" x="394" y="278" width="92" height="42" rx="5"/>
+<text class="lbl" x="440" y="304">10,240</text>
+
+<!-- KV merge -->
+<path class="ar" d="M420,170 L420,208 L380,208 L380,380"/>
+<path class="ar" d="M462,320 L462,380"/>
+<rect class="bx grey" x="332" y="382" width="200" height="46" rx="5"/>
+<text class="lbl" x="432" y="402">Data (KV)</text>
+<text class="sub" x="432" y="419">20,480 × 7</text>
+
+<!-- stage 1: sharp FPS -->
+<path class="ar" d="M486,299 L548,299"/>
+<rect class="bx orange" x="550" y="278" width="98" height="42" rx="5"/>
+<text class="lbl" x="599" y="304">FPS</text>
+<circle cx="559" cy="266" r="11" fill="#ffffff" stroke="#d08a45" stroke-width="1.3"/>
+<text class="tag" x="559" y="270" font-weight="700">1</text>
+<path class="ar" d="M648,299 L712,299"/>
+<rect class="bx orange" x="714" y="274" width="128" height="50" rx="5"/>
+<text class="lbl" x="778" y="295">512 sharp</text>
+<text class="sub" x="778" y="312">anchors</text>
+
+<!-- stage 2: seeded FPS -->
+<path class="ar" d="M486,149 L548,149"/>
+<rect class="bx blue" x="550" y="128" width="98" height="42" rx="5"/>
+<text class="lbl" x="599" y="154">seeded FPS</text>
+<circle cx="559" cy="116" r="11" fill="#ffffff" stroke="#5b87b5" stroke-width="1.3"/>
+<text class="tag" x="559" y="120" font-weight="700">2</text>
+<path class="ard" d="M778,274 L778,208 L600,208 L599,172"/>
+<text class="tag" x="700" y="200">seeds</text>
+<path class="ar" d="M648,149 L712,149"/>
+<rect class="bx blue" x="714" y="124" width="128" height="50" rx="5"/>
+<text class="lbl" x="778" y="145">512 uniform</text>
+<text class="sub" x="778" y="162">anchors</text>
+
+<!-- query -->
+<path class="ar" d="M842,149 L890,149 L890,205 L920,205"/>
+<path class="ar" d="M842,299 L890,299 L890,243 L920,243"/>
+<rect class="bx white" x="922" y="180" width="150" height="88" rx="5"/>
+<rect x="923" y="181" width="148" height="42" fill="#dbe8f5"/>
+<rect x="923" y="223" width="148" height="44" fill="#fae3cd"/>
+<rect class="bx" x="922" y="180" width="150" height="88" rx="5" fill="none" stroke="#666666"/>
+<text class="lbl" x="997" y="205">Query</text>
+<text class="sub" x="997" y="220">512 uniform</text>
+<text class="sub" x="997" y="244">512 sharp</text>
+<text class="sub" x="997" y="260">1024 × 7</text>
+
+<!-- ============================ PANEL (b) ============================ -->
+<line x1="28" y1="452" x2="1572" y2="452" stroke="#dddddd" stroke-width="1"/>
+<text class="pan" x="28" y="500">(b)</text>
+<text class="hdr" x="150" y="500" text-anchor="start">ShapeVAE</text>
+<text class="hdr" x="530" y="540">Encoder</text>
+<text class="hdr" x="1290" y="540">Decoder</text>
+<line x1="1052" y1="512" x2="1052" y2="880" stroke="#dddddd" stroke-width="1.2" stroke-dasharray="6 5"/>
+
+<!-- inputs -->
+<rect class="bx white" x="40" y="596" width="128" height="52" rx="5"/>
+<rect x="41" y="597" width="126" height="25" fill="#dbe8f5"/>
+<rect x="41" y="622" width="126" height="25" fill="#fae3cd"/>
+<rect class="bx" x="40" y="596" width="128" height="52" rx="5" fill="none" stroke="#666666"/>
+<text class="lbl" x="104" y="614">Query</text>
+<text class="sub" x="104" y="640">1024 × 55</text>
+<text class="tag" x="100" y="666">Fourier(xyz) 51</text>
+<text class="tag" x="100" y="679">+ normal 3 + flag 1</text>
+
+<rect class="bx grey" x="40" y="694" width="128" height="52" rx="5"/>
+<text class="lbl" x="104" y="717">Data (KV)</text>
+<text class="sub" x="104" y="734">20,480 × 55</text>
+
+<path class="ar" d="M168,620 L243,620"/>
+<path class="ar" d="M168,720 L243,720"/>
+<text class="tag" x="207" y="661">Linear 55→1024</text>
+<text class="tag" x="207" y="674">shared weights</text>
+
+<!-- encoder cross-attn -->
+<rect class="bx purple" x="245" y="592" width="122" height="158" rx="5"/>
+<text class="lbl" x="306" y="662">Cross-attention</text>
+<text class="sub" x="306" y="680">16 heads</text>
+<text class="tag" x="232" y="614" font-weight="700">Q</text>
+<text class="tag" x="228" y="714" font-weight="700">K,V</text>
+
+<path class="ar" d="M367,671 L403,671"/>
+<rect class="bx grey" x="405" y="622" width="122" height="98" rx="5"/>
+<text class="lbl" x="466" y="666">Self-attention</text>
+<rect x="481" y="630" width="38" height="20" rx="4" fill="#ffffff" stroke="#888888" stroke-width="1"/>
+<text class="tag" x="500" y="644" font-weight="700">× 8</text>
+
+<path class="ar" d="M527,671 L558,671"/>
+<rect class="bx grey" x="560" y="622" width="120" height="98" rx="5"/>
+<text class="lbl" x="620" y="660">LayerNorm</text>
+<text class="sub" x="620" y="682">Linear 1024→128</text>
+
+<path class="ar" d="M680,650 L708,620"/>
+<path class="ar" d="M680,692 L708,722"/>
+<rect class="bx green" x="710" y="596" width="104" height="46" rx="5"/>
+<text class="lbl" x="762" y="616">μ</text>
+<text class="sub" x="762" y="633">1024 × 64</text>
+<rect class="bx green" x="710" y="700" width="104" height="46" rx="5"/>
+<text class="lbl" x="762" y="720">log σ²</text>
+<text class="sub" x="762" y="737">1024 × 64</text>
+
+<!-- KL -->
+<path class="ard" d="M736,596 L736,558"/>
+<path class="ard" d="M710,723 L694,723 L694,535 L712,535"/>
+<rect class="bx white" x="714" y="514" width="96" height="42" rx="5"/>
+<text class="lbl" x="762" y="533">KL</text>
+<text class="sub" x="762" y="548">λ = 1e-4</text>
+
+<!-- reparameterisation -->
+<path class="ar" d="M814,619 L850,656"/>
+<path class="ar" d="M814,723 L850,686"/>
+<circle cx="866" cy="671" r="19" fill="#ffffff" stroke="#6a9c6a" stroke-width="1.3"/>
+<text class="lbl" x="866" y="677">⊕</text>
+<text class="tag" x="866" y="718">z = μ + σ ⊙ ε</text>
+<path class="ar" d="M885,671 L913,671"/>
+<rect class="bx green" x="915" y="632" width="118" height="78" rx="5"/>
+<text class="lbl" x="974" y="666">Latent z</text>
+<text class="sub" x="974" y="686">1024 × 64</text>
+
+<!-- decoder -->
+<path class="ar" d="M1033,671 L1090,671"/>
+<text class="tag" x="1062" y="650">Linear</text>
+<text class="tag" x="1062" y="663">64→1024</text>
+<rect class="bx grey" x="1092" y="622" width="122" height="98" rx="5"/>
+<text class="lbl" x="1153" y="666">Self-attention</text>
+<rect x="1166" y="630" width="42" height="20" rx="4" fill="#ffffff" stroke="#888888" stroke-width="1"/>
+<text class="tag" x="1187" y="644" font-weight="700">× 16</text>
+
+<path class="ar" d="M1214,671 L1255,671"/>
+<rect class="bx purple" x="1257" y="592" width="122" height="158" rx="5"/>
+<text class="lbl" x="1318" y="656">Cross-attention</text>
+<text class="sub" x="1318" y="674">16 heads</text>
+<text class="tag" x="1240" y="661" font-weight="700">K,V</text>
+<text class="tag" x="1288" y="770" font-weight="700">Q</text>
+
+<!-- sdf query input -->
+<rect class="bx white" x="1180" y="828" width="176" height="50" rx="5"/>
+<text class="lbl" x="1268" y="849">SDF query points</text>
+<text class="sub" x="1268" y="866">16,384 × 3</text>
+<path class="ar" d="M1268,828 L1268,752"/>
+<text class="tag" x="1198" y="800">Fourier</text>
+<text class="tag" x="1198" y="813">Linear 51→1024</text>
+
+<!-- output + loss -->
+<path class="ar" d="M1379,671 L1424,671"/>
+<text class="tag" x="1401" y="650">Linear</text>
+<text class="tag" x="1401" y="663">1024→1</text>
+<rect class="bx white" x="1426" y="632" width="132" height="78" rx="5"/>
+<text class="lbl" x="1492" y="666">Predicted SDF</text>
+<text class="sub" x="1492" y="686">16,384 × 1</text>
+
+<path class="ar" d="M1492,710 L1492,752"/>
+<rect class="bx white" x="1426" y="754" width="132" height="42" rx="5"/>
+<text class="lbl" x="1492" y="780">MSE</text>
+<path class="ar" d="M1492,836 L1492,798"/>
+<rect class="bx white" x="1426" y="836" width="132" height="42" rx="5"/>
+<text class="lbl" x="1492" y="862">GT SDF</text>
+</svg>

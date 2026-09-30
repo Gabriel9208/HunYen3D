@@ -1,0 +1,49 @@
+# @package _global_
+defaults:
+  - /capacity: baseline_lat1024_l8_16   # preprocess: random/important_sample_count=512 each -> FrameEncoder sees 512 sharp query points
+  - override /model: frame_vae
+  - override /data: shape_vae_frame
+  - override /scheduler: null
+  - _self_
+
+optimizer:
+  lr: 3.5e-5
+  weight_decay: 0
+
+model:
+  num_latents: 512   # capacity file above sets this to 1024 (its own convention); override back to the
+                      # actual FrameEncoder output length
+  encoder_pe_dim: 52
+  decoder_pe_dim: 51
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0
+
+trainer:
+  max_epochs: -1
+  val_interval: 1
+  amp: true
+  resume: null
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: vae_frame_kl1e-4_512_l8_16
+  tags: [vae, lat512, deep, kl1e4, frame, sharp-only]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/vae_frame_kl1e-4_512_l8_16/${now:%Y-%m-%d_%H-%M-%S}

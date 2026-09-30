@@ -1,7 +1,3 @@
-# Shape VAE. Dims must stay consistent with the preprocess config (pe_freqs=8):
-#   encoder_pe_dim == query/data width = fourier(xyz) + normal + label = 3*(2*pe_freqs+1) + 4 = 51 + 4 = 55
-#   decoder_pe_dim == SDF query point width = fourier(xyz)               = 3*(2*pe_freqs+1)     = 51
-#   num_latents    == FPS query length = random_sample_count + important_sample_count = 2048 + 2048 = 4096
 _target_: src.model.shape.VAE.vae.VAE
 num_latents: 4096
 encoder_pe_dim: 55
@@ -11,3 +7,16 @@ width: 1024
 num_head: 16
 num_encoder_layers: 8
 num_decoder_layers: 16
+
+# lambda-VAE (arXiv:2607.05531): z = mu + sigma^lam * eps while the KL keeps charging sigma^2.
+# lam_delta <= 1 disables it entirely (default), so every existing run is unaffected.
+lam_delta: 0.0
+lam_ramp_steps: 225000   # ~10 epochs 
+lam_ema: 0.9              # paper's EMA decay, applied once per update window (not per step)
+lam_max: 100.0
+lam_update_every: 3000   # encode() calls between lam* recomputations. Sized as a FRACTION OF THE
+                         # RAMP, not in epochs: the paper refreshes every 2 of 150 ramp epochs
+                         # (1.3%), so 1.3% of 225000 ~= 3000. At ~1 epoch (22000) the first refresh
+                         # lands at epoch 0.97 and drops the noise 0.870 -> 0.629 in a single step;
+                         # at 3000 the first refresh is at epoch 0.13 for 0.870 -> 0.832, and the
+                         # largest single-step drop over the ramp falls from 0.241 to 0.038.

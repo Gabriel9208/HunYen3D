@@ -1,0 +1,32 @@
+# @package _global_
+# Inherits vae_converge_kl1e-4_1024_l8_16 and overrides ONLY the model, so the sole difference from
+# that run is RoPE on the encoder cross-attention's q/k. RoPE adds no parameters, so the two arms
+# have identical capacity — a win cannot be attributed to size.
+#
+# Motivation (2026-08-16 measurements, scripts/attention_locality.py): the baseline's cross-attention
+# barely localises — the fraction of a query's 32 most-attended points that lie among its 256 nearest
+# is 53.4%, and with the normals removed from the input it collapses to 3.4%. The reason is that the
+# shift-invariant kernel <F(pi),F(pj)> = sum cos(w.dp) that Fourier features provide does not survive
+# the learned W_q^T W_k (synthetic check: correlation with distance -0.337 -> 0.005), and lowering
+# pe_freqs does not rescue it. RoPE applies the rotation AFTER the projection, so the relative-position
+# structure is guaranteed by construction. In the double-stream run the RoPE branch reached 82.5%
+# locality, and zeroing rope_coord_scale alone dropped it to 4.8% — a single-variable attribution.
+# Launch:  +experiment=vae_rope_kl1e-4_1024_l8_16
+defaults:
+  - vae_converge_kl1e-4_1024_l8_16
+  - override /model: rope_vae
+  - _self_
+
+model:
+  # /capacity sets num_latents + layer counts; the pe dims are the same 55/51 as the baseline because
+  # the input format is unchanged (fourier 51 | normal 3 | flag 1).
+  encoder_pe_dim: 55
+  decoder_pe_dim: 51
+
+wandb:
+  name: vae_rope_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e4, rope, converge, constant-lr]
+
+hydra:
+  run:
+    dir: outputs/vae_rope_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

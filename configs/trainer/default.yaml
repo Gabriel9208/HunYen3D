@@ -8,5 +8,11 @@ val_interval: 1       # in epochs
 ckpt_interval: 1      # in epochs (used when no validation runs that epoch)
 ckpt_dir: checkpoints # relative to the Hydra run dir
 resume: null          # absolute path to a last.pt to resume from
+init_from: null       # absolute path to a ckpt to warm-start MODEL WEIGHTS from (fresh
+                      # optimizer/epoch/best_metric); ignored when resume is set
+nonfinite_patience: 50 # consecutive NaN/Inf steps tolerated (each is skipped, not applied)
+                       # before aborting; 0 non-finite steps is the normal case
 progress: true        # show tqdm progress bars (set false for CI / log files)
 seed: 42
+best_metric_key: val/loss   # metric that selects best.pt (VAE default: lower val loss is better)
+best_metric_mode: min       # min | max ; DiT flow runs override to val/viou_t0.7 + max

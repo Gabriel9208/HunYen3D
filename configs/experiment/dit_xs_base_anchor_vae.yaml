@@ -1,0 +1,52 @@
+# @package _global_
+# Named alias for what dit_xs_base.yaml currently trains (task.vae_ckpt = anchor_converge_lr3.5e-6's
+# best.pt, task.vae = AnchorVAE). dit_xs_base.yaml's vae_ckpt has been overwritten three times across
+# separate runs (vae_converge_lr3.5e-6 kl1e-3 -> vae_converge_kl1e-4_lr3.5e-6 -> anchor_converge_lr3.5e-6,
+# see each run's own outputs/dit_xs_base/*/.hydra/config.yaml for what was actually used), so the file
+# on disk no longer identifies which arm it trained. This file exists so "anchor VAE, base DiT" has a
+# stable, unambiguous name going forward, matching the sibling naming of dit_xs_base_rope_vae /
+# dit_xs_base_vanilla_vae. Already trained -- no need to relaunch:
+#   outputs/dit_xs_base_anchor_vae/2026-08-14_11-43-42/checkpoints/best.pt  (epoch 74, val/viou_t0.7 = 60.08)
+# (moved 2026-08-20 out of outputs/dit_xs_base/, which it originally shared with the vanilla_vae run
+# under a name that no longer identified which arm was which)
+# Launch (only if retraining from scratch is wanted):  +experiment=dit_xs_base_anchor_vae
+defaults:
+  - dit_baseline
+  - override /model: mm_dit_xs
+  - _self_
+
+task:
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/anchor_converge_lr3.5e-6_1024_l8_16/2026-07-27_15-22-50/checkpoints/best.pt
+
+  vae:
+    _target_: src.model.shape.VAE.vae.AnchorVAE
+    num_latents: 1024
+    encoder_pe_dim: 55
+    decoder_pe_dim: 51
+    latent_dim: 64
+    width: 1024
+    num_head: 16
+    num_encoder_layers: 8
+    num_decoder_layers: 16
+    num_anchor_layers: 6
+    detach_anchor: false
+    position_encoder:
+      _target_: src.model.shape.preprocess.FourierEmbedder
+      num_freqs: 8
+      input_dim: 3
+      include_input: true
+      include_pi: true
+
+data:
+  batch_size: 8
+
+trainer:
+  grad_accum_steps: 4
+
+wandb:
+  name: dit_xs_base_anchor_vae
+  tags: [dit, flow-matching, mm-dit, dinov2, xs, ladder, anchor-vae]
+
+hydra:
+  run:
+    dir: outputs/dit_xs_base_anchor_vae/${now:%Y-%m-%d_%H-%M-%S}

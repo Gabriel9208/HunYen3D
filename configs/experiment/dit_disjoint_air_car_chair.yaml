@@ -1,0 +1,26 @@
+# @package _global_
+# Same as dit_disjoint_kl1e-4_lr3.5e-6_1024_l8_16 (plain flow-matching, self_cond=false, disjoint-
+# sampling VAE), restricted to airplane/car/chair -- same category scope as dit_full_air_car_chair.
+# Launch:  uv run python train.py +experiment=dit_disjoint_air_car_chair
+defaults:
+  - dit_disjoint_kl1e-4_lr3.5e-6_1024_l8_16
+  - _self_
+
+data:
+  train:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]   # air/car/chair, same as dit_full_air_car_chair
+  val:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]
+  test:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]
+
+wandb:
+  name: dit_disjoint_air_car_chair
+  tags: [dit, flow-matching, mm-dit, vanilla, disjoint-fps, air-car-chair]
+
+hydra:
+  run:
+    dir: outputs/dit_disjoint_air_car_chair/${now:%Y-%m-%d_%H-%M-%S}

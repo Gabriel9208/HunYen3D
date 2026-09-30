@@ -1,0 +1,29 @@
+_target_: src.model.shape.VAE.vae.MaskedVAE
+num_latents: 4096
+encoder_pe_dim: 55
+decoder_pe_dim: 51
+latent_dim: 64
+width: 1024
+num_head: 16
+num_encoder_layers: 8   # must be even: the encoder splits into (n-2)/2 + mix + (n-2)/2 + mix
+num_decoder_layers: 16
+
+# lambda-VAE (arXiv:2607.05531): z = mu + sigma^lam * eps while the KL keeps charging sigma^2.
+# lam_delta <= 1 disables it entirely (default), so every existing masked run is unaffected.
+lam_delta: 0.0
+lam_ramp_steps: 225000   # ~10 epochs of encode() calls (~22.7k calls/epoch at batch 2 x accum 16).
+                         # NOT set by sigma stabilisation -- that is done by epoch 1 here (0.87 at
+                         # ep1, 0.83-0.94 across ep9-60 of five runs). It is set by how long the
+                         # DECODER needs to track the shrinking latent scale: on a converged model,
+                         # dropping the noise 0.89 -> 0.032 in one go costs 9 V-IoU (73.3 -> 64.2),
+                         # because z.std halves and proj_latent has never seen that scale.
+                         # Rule of thumb: the run must last at least 2x the ramp, so lambda* is
+                         # fully on for as long as it took to get there -- >= 20 epochs here.
+lam_ema: 0.9              # paper's EMA decay, applied once per update window (not per step)
+lam_max: 100.0
+lam_update_every: 3000   # encode() calls between lam* recomputations. Sized as a FRACTION OF THE
+                         # RAMP, not in epochs: the paper refreshes every 2 of 150 ramp epochs
+                         # (1.3%), so 1.3% of 225000 ~= 3000. At ~1 epoch (22000) the first refresh
+                         # lands at epoch 0.97 and drops the noise 0.870 -> 0.629 in a single step;
+                         # at 3000 the first refresh is at epoch 0.13 for 0.870 -> 0.832, and the
+                         # largest single-step drop over the ramp falls from 0.241 to 0.038.

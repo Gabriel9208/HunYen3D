@@ -1,5 +1,0 @@
-_target_: src.engine.task.SignHingeSDFLoss
-near_weight: 4.0
-near_beta: 100.0
-sign_weight: 0.1     # α: weight of the sign hinge; 0 reverts to plain weighted MSE. Hinge doesn't blow up, so it can go larger {0.1,0.5,1.0}
-sign_margin: 0.0     # how far pred must cross zero to count as correct; 0 = pure sign correctness

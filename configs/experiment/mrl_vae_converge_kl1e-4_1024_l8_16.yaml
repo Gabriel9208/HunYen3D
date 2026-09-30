@@ -1,0 +1,29 @@
+# @package _global_
+# MRL (matryoshka truncation) on top of the disjoint-sampling VAE: each step draws one m uniformly
+# from task.m_values=[64,32,16] and trains the encoder/decoder to reconstruct from just the first m
+# latent channels.
+
+# Launch:  +experiment=mrl_vae_converge_kl1e-4_1024_l8_16
+defaults:
+  - vae_baseline_1024_l8_16
+  - override /task: mrl_vae
+  - override /model: mrl_vae
+  - override /data: shape_vae_disjoint
+  - override /scheduler: null   # constant LR, matching the converge family
+  - _self_
+
+task:
+  kl_weight: 1e-4
+
+trainer:
+  max_epochs: -1   
+  best_metric_key: val/viou
+  best_metric_mode: max
+
+wandb:
+  name: mrl_vae_converge_kl1e-4_1024_l8_16
+  tags: [baseline, vae, lat1024, deep, kl1e-4, converge, constant-lr, mrl, disjoint-fps]
+
+hydra:
+  run:
+    dir: outputs/mrl_vae_converge_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

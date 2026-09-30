@@ -25,17 +25,15 @@ from src.engine.utils import (
 
 log = logging.getLogger(__name__)
 
+# lambda-VAE schedule buffers (registered persistent=False on VAE, see vae.py) -- saved
+# and restored explicitly so a resume continues the ramp instead of starting it over.
+_LAM_BUFFERS = ("sigma_ema", "sigma_acc", "acc_n", "lam_star", "lam_step")
+
 
 class Trainer:
-    """Plain-PyTorch training loop: AMP, grad accumulation, grad clipping,
-    per-step scheduler, logging cadence, checkpoint save/resume.
-
-    Depends only on the `Task` contract, never on a specific model.
-    """
-
     def __init__(
         self,
-        cfg: DictConfig,  # the `trainer` subconfig
+        cfg: DictConfig,
         model,
         task,
         optimizer,
@@ -66,13 +64,27 @@ class Trainer:
         self.ckpt_interval = int(cfg.ckpt_interval)
         self.progress = bool(cfg.get("progress", True))
 
+        # best.pt selection metric + direction (config-driven so VAE keeps val/loss+min while DiT uses val/viou_mean+max)
+        # Non-finite guard: skip the offending micro-batch, abort once nothing finite comes out.
+        self.nonfinite_patience = int(cfg.get("nonfinite_patience", 50))
+        self.nonfinite_streak = 0
+        self.nonfinite_total = 0
+        self.best_key = cfg.get("best_metric_key", "val/loss")
+        self.best_mode = cfg.get("best_metric_mode", "min")
+
         self.epoch = 0
         self.global_step = 0
-        self.best_metric = float("inf")
+        self.best_metric = float("inf") if self.best_mode == "min" else float("-inf")
 
     def fit(self) -> None:
         if self.cfg.get("resume"):
             self._resume(self.cfg.resume)
+        elif self.cfg.get("init_from"):
+            # Warm start: model weights only. Optimizer moments, epoch counter and best_metric all stay
+            # fresh, so this is a NEW run that happens to start from a trained model -- not a resume.
+            ckpt = CheckpointManager.load(self.cfg.init_from, map_location=self.device)
+            self.model.load_state_dict(ckpt["model"])
+            log.info("warm start from %s (weights only, epoch %s)", self.cfg.init_from, ckpt.get("epoch"))
 
         with logging_redirect_tqdm():
             # max_epochs < 0 (sentinel -1) -> train forever until the process is stopped;
@@ -95,8 +107,12 @@ class Trainer:
                 do_val = self.val_loader is not None and (epoch + 1) % self.val_interval == 0
                 if do_val:
                     metric = self.validate()
-                    is_best = metric < self.best_metric
-                    self.best_metric = min(metric, self.best_metric)
+                    if self.best_mode == "min":
+                        is_best = metric < self.best_metric
+                        self.best_metric = min(metric, self.best_metric)
+                    else:
+                        is_best = metric > self.best_metric
+                        self.best_metric = max(metric, self.best_metric)
                     self._save(is_best)
                     epoch_bar.set_postfix(best=self.best_metric)
                 elif (epoch + 1) % self.ckpt_interval == 0:
@@ -120,15 +136,32 @@ class Trainer:
             with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=self.amp):
                 out = self.task.step(self.model, batch)
                 loss = out.loss / self.grad_accum
+
+            # Non-finite guard, forward side. Dropping the micro-batch before backward() keeps the
+            # weights clean -- a NaN loss has not touched them yet, but backprop through it would.
+            if not torch.isfinite(loss):
+                self._nonfinite("loss", out, batch)
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
+
             loss.backward()
 
             if (i + 1) % self.grad_accum != 0:
                 continue
 
-            if self.grad_clip:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            # Non-finite guard, backward side. grad_clip already reduces over every gradient, so its
+            # returned norm is a free NaN/Inf detector -- and gradients can be non-finite even when
+            # every loss in the window was finite (0 * inf inside a masked branch, for one).
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip) \
+                if self.grad_clip else None
+            if grad_norm is not None and not torch.isfinite(grad_norm):
+                self._nonfinite("grad_norm", out, batch, grad_norm=grad_norm)
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
+
             self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
+            self.nonfinite_streak = 0
             if self.scheduler is not None:
                 self.scheduler.step()
             self.global_step += 1
@@ -152,6 +185,8 @@ class Trainer:
                     self.global_step,
                     out.loss.item(),
                 )
+
+        self.optimizer.zero_grad(set_to_none=True)
 
     @torch.no_grad()
     def validate(self) -> float:
@@ -178,7 +213,7 @@ class Trainer:
         metrics.update({f"val/{k}": v / max(n, 1) for k, v in sums.items()})
         self.logger.log(metrics, step=self.global_step)
         log.info("[val] epoch %d loss %.4f", self.epoch, avg)
-        return avg
+        return metrics[self.best_key]  # value the best.pt selection compares on (val/loss or val/viou_mean)
 
     def _save(self, is_best: bool) -> None:
         state = {
@@ -190,8 +225,50 @@ class Trainer:
             "best_metric": self.best_metric,
             "cfg": OmegaConf.to_container(self.cfg, resolve=True),
         }
+        # lambda-VAE schedule state. Its buffers are persistent=False so that checkpoints stay
+        # loadable by models built before lambda-VAE existed; that also keeps them out of
+        # state_dict, so they are saved separately here or a resume would silently restart the ramp.
+        lam_state = {k: getattr(self.model, k).detach().cpu().clone()
+                     for k in _LAM_BUFFERS if hasattr(self.model, k)}
+        if lam_state:
+            state["lam_state"] = lam_state
         path = self.ckpt.save(state, is_best=is_best)
         log.info("saved checkpoint -> %s", path)
+
+    def _nonfinite(self, where: str, out, batch, grad_norm=None) -> None:
+        """Report a NaN/Inf and drop the step. Aborts after nonfinite_patience in a row.
+
+        A single bad micro-batch is survivable and worth skipping; a run that cannot produce a
+        finite step any more is burning GPU for nothing, which is what the lambda-VAE overflow did
+        for hours before anyone noticed. The dump is deliberately cheap (reductions only) so the
+        guard costs nothing on the happy path.
+        """
+        self.nonfinite_streak = getattr(self, "nonfinite_streak", 0) + 1
+        self.nonfinite_total = getattr(self, "nonfinite_total", 0) + 1
+        if self.nonfinite_streak <= 3 or self.nonfinite_streak % 100 == 0:
+            parts = [f"non-finite {where} at epoch {self.epoch} step {self.global_step} "
+                     f"(streak {self.nonfinite_streak}, total {self.nonfinite_total})"]
+            if grad_norm is not None:
+                parts.append(f"grad_norm={float(grad_norm)}")
+            parts.append("metrics=" + ", ".join(f"{k}={v:.4g}" for k, v in out.metrics.items()
+                                                if isinstance(v, (int, float))))
+            for k, v in batch.items():
+                if torch.is_tensor(v) and v.is_floating_point():
+                    fin = torch.isfinite(v)
+                    parts.append(f"{k}[finite={int(fin.all())} absmax={float(v[fin].abs().max()) if fin.any() else float('nan'):.4g}]")
+            bad = [n for n, p in self.model.named_parameters() if not torch.isfinite(p).all()]
+            parts.append(f"non-finite params: {len(bad)}" + (f" first={bad[0]}" if bad else ""))
+            if grad_norm is not None:
+                bg = [n for n, p in self.model.named_parameters()
+                      if p.grad is not None and not torch.isfinite(p.grad).all()]
+                parts.append(f"non-finite grads: {len(bg)}" + (f" first={bg[0]}" if bg else ""))
+            log.warning(" | ".join(parts))
+        if self.nonfinite_streak >= self.nonfinite_patience:
+            raise RuntimeError(
+                f"{self.nonfinite_streak} consecutive non-finite steps at epoch {self.epoch} "
+                f"step {self.global_step}; aborting instead of burning GPU. Last good checkpoint is "
+                f"in {self.ckpt.dir if hasattr(self.ckpt, 'dir') else 'checkpoints/'}."
+            )
 
     def _resume(self, path: str) -> None:
         ckpt = CheckpointManager.load(path, map_location=self.device)
@@ -206,6 +283,13 @@ class Trainer:
                 g["lr"] = lr
         if self.scheduler is not None and ckpt.get("scheduler") is not None:
             self.scheduler.load_state_dict(ckpt["scheduler"])
+        for k, v in (ckpt.get("lam_state") or {}).items():
+            if hasattr(self.model, k):
+                getattr(self.model, k).copy_(v.to(self.device))
+        if ckpt.get("lam_state"):
+            log.info("restored lambda-VAE schedule: lam_step=%d", int(self.model.lam_step))
+        elif hasattr(self.model, "lam_step") and float(getattr(self.model, "lam_delta", 0.0)) > 1.0:
+            log.warning("checkpoint has no lambda schedule state; the ramp restarts from step 0")
         self.epoch = ckpt.get("epoch", 0)
         self.global_step = ckpt.get("global_step", 0)
         self.best_metric = ckpt.get("best_metric", float("inf"))
@@ -222,11 +306,10 @@ def run(cfg: DictConfig) -> None:
     task = instantiate(cfg.task)
     optimizer = build_optimizer(cfg.optimizer, model.parameters())
 
-    # Build the dataloader first so len(train_loader) is known; the scheduler's T_max is auto-computed from the total optimizer-step count.
     train_loader, val_loader = build_dataloaders(cfg.data)
     steps_per_epoch = len(train_loader) // max(1, int(tcfg.grad_accum_steps))
     max_epochs = int(tcfg.max_epochs)
-    total_steps = steps_per_epoch * max_epochs if max_epochs > 0 else None  # None for infinite (-1): no T_max autofill
+    total_steps = steps_per_epoch * max_epochs if max_epochs > 0 else None
     scheduler = build_scheduler(cfg.get("scheduler"), optimizer, total_steps=total_steps)
     log.info("scheduler total_steps (T_max if missing): %s", total_steps)
 

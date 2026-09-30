@@ -1,0 +1,49 @@
+# @package _global_
+# Continuation of vae_converge_1024_l8_16 with the LR dropped 10× (3.5e-5 → 3.5e-6) to settle the constant-LR
+# plateau (RESEARCH_LOG Stage-1: constant LR floors at the SGD noise ball; a lower LR settles closer). Resumes
+# from that run's last.pt (Adam moments + epoch/step counter kept); the _resume lr-override (runner.py,
+# scheduler-less branch) makes the config lr win over the checkpoint's old 3.5e-5. Logged as a NEW wandb run
+# (id: null) and a NEW hydra run dir, so the pre-÷10 run's ckpts are never overwritten. Vanilla arm of the
+# clean anchor-vs-vanilla A/B (pairs with anchor_converge_lr3.5e-6_1024_l8_16).
+# Launch:  +experiment=vae_converge_lr3.5e-6_1024_l8_16
+defaults:
+  - /capacity: baseline_lat1024_l8_16
+  - override /scheduler: null   # constant LR (no scheduler); the _resume lr-override applies here
+  - _self_
+
+optimizer:
+  lr: 3.5e-6                    # 10× lower than the 3.5e-5 converge run
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-3
+  recon_loss:
+    near_beta: 0                # plain unweighted MSE
+
+trainer:
+  max_epochs: -1                # infinite: train until manually stopped
+  val_interval: 1
+  amp: true
+  # resume from the pre-÷10 vae_converge run's last.pt (Adam moments + epoch/step restored; lr forced to 3.5e-6)
+  resume: /home/gabriel/dev/HunYen3D/outputs/vae_converge_1024_l8_16/2026-07-28_10-58-23/checkpoints/last.pt
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: vae_converge_lr3.5e-6_1024_l8_16
+  tags: [baseline, vae, lat1024, deep, kl1e3, converge, constant-lr, lr3.5e-6, resume]
+  mode: online
+  id: null                      # NEW wandb run (fresh id)
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/vae_converge_lr3.5e-6_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

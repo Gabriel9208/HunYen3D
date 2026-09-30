@@ -1,0 +1,28 @@
+# @package _global_
+# Inherits vae_rope_kl1e-4_1024_l8_16 and turns RoPE on in the encoder's 8 self-attention layers too,
+# so the ONLY difference from that run is encoder.py:62-63. Still zero new parameters (verified), so
+# all three arms — vanilla / rope / rope+self — have identical capacity.
+#
+# Motivation (2026-08-18, scripts/latent_locality.py): RoPE's effect on the cross-attention map is
+# large (top32-in-256NN 77.4% vs the baseline's 53.4% at a matched epoch 33), but it barely survives
+# to the latent. Perturbing a 512-point patch of the input and measuring where the change lands among
+# the latent tokens gives 24.5% +- 1.7% of the delta mass in the 64 nearest latents, against the
+# baseline's 20.2% +- 1.4% (chance 6.25%) — about 2 sigma on that metric and inside 1 sigma on the
+# other two. The suspect is encoder.py:40-42: those 8 self-attention layers carry NO position
+# information at all, so they are free to mix globally and wash the locality out. Every latent token
+# already has an anchor xyz (its FPS query point), so rotating their q/k is free.
+# Launch:  +experiment=vae_rope_self_kl1e-4_1024_l8_16
+defaults:
+  - vae_rope_kl1e-4_1024_l8_16
+  - _self_
+
+model:
+  enable_self_atten_rope: true
+
+wandb:
+  name: vae_rope_self_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e4, rope, rope-self, converge, constant-lr]
+
+hydra:
+  run:
+    dir: outputs/vae_rope_self_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,2 +1,0 @@
-_target_: src.engine.task.ClampedSDFLoss
-clamp_val: 0.1     # TSDF clamp ±δ; ⚠️ collapses from-scratch, comparison only

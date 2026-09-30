@@ -1,0 +1,71 @@
+# @package _global_
+# Three levers stacked on the disjoint VAE, all aimed at the same measured problem (81% of the SDF
+# MSE is underfitting the decoder cannot improve): MRL prefixes, lambda-VAE, and a per-m recon
+# exponent that drops to 0.5 at full width. Confounded by design -- this answers "does the stack
+# beat 83 V-IoU at all"; the partner isolating the exponent is this config minus m_exponents.
+# MUST run >= 20 epochs. Risk analysis and the eps=1e-4 justification:
+# docs/RESEARCH_LOG.md -> "MRL + lambda + per-m exponents, stacked".
+
+# Launch:  +experiment=mrl_lambda_exp_disjoint_kl1e-4_1024_l8_16
+defaults:
+  - /capacity: baseline_lat1024_l8_16   # 1024 latents, enc8/dec16, batch 2 x grad_accum 16
+  - override /task: mrl_vae
+  - override /model: mrl_vae
+  - override /data: shape_vae_disjoint  # sharp FPS first, then seeded FPS for the uniform half
+  - override /scheduler: null           # constant LR (the "converge" family)
+  - _self_
+
+model:
+  lam_delta: 1.1           # noise floor sqrt(1-1/delta) = 0.302, the value the partner run used
+  lam_ramp_steps: 225000   # ~10 epochs; sized for the DECODER to track the shrinking latent scale,
+                           # not for sigma to settle. RUN THIS >= 20 EPOCHS or you measure an
+                           # unfinished schedule rather than the method.
+
+optimizer:
+  lr: 3.5e-6
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+  m_values: [8, 16, 32, 64]
+  m_weights: [1, 2, 3, 4]      # sampling distribution over m, so one decode per step, not four
+  m_exponents: [2.0, 1.5, 1.0, 0.5]
+  recon_loss:
+    near_beta: 0               # unweighted, as in every partner in this family
+    eps: 1e-4                  # NOT the 1e-9 default. Smoothing only acts where |e| < eps, and a
+                               # batch of 50k residuals ~N(0, 0.004) puts its smallest |e| near 1e-7
+                               # every single step, so 1e-9 is inert: measured max/typical per-point
+                               # gradient ratio at exp=0.5 is 436 for 1e-9 against 11.5 for 1e-4,
+                               # while plain MSE's own ratio is 9.7. 1e-4 is the value that leaves
+                               # this no more lopsided than the MSE training you already trust, and
+                               # it inflates the reported loss by 0.07%.
+
+trainer:
+  val_interval: 1
+  amp: true
+  resume: null
+  max_epochs: -1             # run until stopped; see the >= 20 epoch note above
+  best_metric_key: val/viou  # validation always runs at m = max(m_values) = 64, so this stays
+                             # directly comparable to the non-MRL runs
+  best_metric_mode: max
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: mrl_lambda_exp_disjoint_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps, mrl, lambda-vae, robust-loss]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/mrl_lambda_exp_disjoint_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

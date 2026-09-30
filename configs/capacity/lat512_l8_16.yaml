@@ -1,0 +1,14 @@
+# @package _global_
+model:
+  num_latents: 512
+  latent_dim: 32
+  num_encoder_layers: 8
+  num_decoder_layers: 16
+preprocess:
+  random_sample_count: 256
+  important_sample_count: 256
+  downsample_ratio: 40
+data:
+  batch_size: 2
+trainer:
+  grad_accum_steps: 16     
