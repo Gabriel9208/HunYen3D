@@ -1,0 +1,18 @@
+_target_: src.model.shape.VAE.vae.MRLVAE
+num_latents: 4096
+encoder_pe_dim: 55
+decoder_pe_dim: 51
+latent_dim: 64
+width: 1024
+num_head: 16
+num_encoder_layers: 8
+num_decoder_layers: 16
+
+# lambda-VAE (arXiv:2607.05531). Same knobs as configs/model/shape_vae.yaml; lam_delta <= 1 disables
+# it, so every existing MRL run is unaffected. MRLVAE.encode evaluates lam* on the full 64 channels
+# before truncating to m, so the schedule does not depend on which m each step drew.
+lam_delta: 0.0
+lam_ramp_steps: 225000
+lam_ema: 0.9
+lam_max: 100.0
+lam_update_every: 3000

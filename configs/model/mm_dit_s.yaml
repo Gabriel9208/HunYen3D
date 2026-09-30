@@ -1,0 +1,10 @@
+defaults:
+  - mm_dit
+  - _self_
+
+double_stream_layers: 8
+single_stream_layers: 16
+width: 1024
+num_head: 16
+
+use_checkpoint: true

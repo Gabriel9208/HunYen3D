@@ -2,9 +2,10 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-"""
-Drop path (Stochastic Depth) code from Hunyuan3D 2.1 (And it is also in timm)
-"""
+from src.model.general.rope import apply_rope, _rope
+
+
+#Drop path (Stochastic Depth) code from Hunyuan3D 2.1 (And it is also in timm)
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
     """
@@ -102,7 +103,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.k_norm = nn.LayerNorm(width // num_head, eps=1e-6)
         self.proj = nn.Linear(width, width)
 
-    def forward(self, x):
+    def forward(self, x, pe_latent=None):
         batch, length, width = x.shape
         assert  (length * width) % self.num_latents == 0
 
@@ -112,6 +113,10 @@ class MultiHeadSelfAttention(nn.Module):
 
         q = self.q_norm(q)
         k = self.k_norm(k)
+
+        if pe_latent is not None:
+            q = apply_rope(q, pe_latent.unsqueeze(2))
+            k = apply_rope(k, pe_latent.unsqueeze(2))
 
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
@@ -144,7 +149,7 @@ class MultiHeadCrossAttention(nn.Module):
         self.k_norm = nn.LayerNorm(width // num_head, eps=1e-6)
         self.proj = nn.Linear(width, width)
 
-    def forward(self, query, data):
+    def forward(self, query, data, q_pe_latent=None, d_pe_latent=None):
         batch, q_len, width = query.shape
         _, data_len, data_dim = data.shape
         
@@ -155,10 +160,13 @@ class MultiHeadCrossAttention(nn.Module):
         kv = kv.view(batch, data_len, self.num_head, -1)
 
         k, v = kv.chunk(2, dim=-1)
-       
 
         q = self.q_norm(q)
         k = self.k_norm(k)
+
+        if q_pe_latent is not None and d_pe_latent is not None:
+            q = apply_rope(q, q_pe_latent.unsqueeze(2))
+            k = apply_rope(k, d_pe_latent.unsqueeze(2))
 
         q = q.view(batch, q_len, self.num_head, self.head_dim).transpose(1, 2)
         k = k.view(batch, data_len, self.num_head, self.head_dim).transpose(1, 2)
@@ -187,8 +195,8 @@ class ResidualMultiHeadSelfAttention(nn.Module):
         self.ln_mlp = nn.LayerNorm(width, eps=1e-6)
         self.mlp = MLP(width, expansion=mlp_expansion, drop_prob=drop_prob)
 
-    def forward(self, x):
-        x = x + self.self_attention(self.ln_qkv(x))
+    def forward(self, x, pe_latent=None):
+        x = x + self.self_attention(self.ln_qkv(x), pe_latent)
         x = x + self.mlp(self.ln_mlp(x))
         return x
 
@@ -211,8 +219,8 @@ class ResidualMultiHeadCrossAttention(nn.Module):
         self.ln_mlp = nn.LayerNorm(width, eps=1e-6)
         self.mlp = MLP(width, expansion=mlp_expansion, drop_prob=drop_prob)
 
-    def forward(self, query, data):
-        x = query + self.cross_attention(self.ln_q(query), self.ln_data(data))
+    def forward(self, query, data, q_pe_latent=None, d_pe_latent=None):
+        x = query + self.cross_attention(self.ln_q(query), self.ln_data(data), q_pe_latent, d_pe_latent)
         x = x + self.mlp(self.ln_mlp(x))
         return x
         
@@ -240,7 +248,7 @@ class SingleStreamMultiHeadSelfAttention(nn.Module):
         self.activate = nn.GELU(approximate="tanh")
         self.proj = nn.Linear(width + mlp_expansion*width, width)
 
-    def forward(self, y, x):
+    def forward(self, y, x, pe=None):
         batch, length, width = x.shape
 
         gate, scale, shift = self.adaln(y)
@@ -256,6 +264,11 @@ class SingleStreamMultiHeadSelfAttention(nn.Module):
 
         q = self.q_norm(q) # (B, H, L, D)
         k = self.k_norm(k) # (B, H, L, D)
+
+        if pe is not None:
+            pe = pe.unsqueeze(1)
+            q = apply_rope(q, pe)
+            k = apply_rope(k, pe)
 
         attn = F.scaled_dot_product_attention(q, k, v) # (B, H, L, D)
         attn = attn.transpose(1, 2).contiguous().view(batch, length, -1) # (B, L, W)
@@ -275,22 +288,26 @@ class DoubleStreamMultiHeadSelfAttention(nn.Module):
         width: int,
         num_head: int,
         mlp_expansion: int,
-        drop_prob: float = 0.
+        drop_prob: float = 0.,
+        enable_mod: bool = True
     ):
         super().__init__()
         assert width % num_head == 0
 
         self.width = width
         self.num_head = num_head
+        self.enable_mod = enable_mod
 
         self.latent_norm1 = nn.LayerNorm(width, eps=1e-6, elementwise_affine=False)
-        self.latent_adaln = AdaLN(width, num_mod=2)
+        if self.enable_mod:
+            self.latent_adaln = AdaLN(width, num_mod=2)
         self.latent_qkv_proj = nn.Linear(width, width * 3)
         self.latent_q_norm = nn.RMSNorm(width // num_head, eps=1e-6)
         self.latent_k_norm = nn.RMSNorm(width // num_head, eps=1e-6)
 
         self.cond_norm1 = nn.LayerNorm(width, eps=1e-6, elementwise_affine=False)
-        self.cond_adaln = AdaLN(width, num_mod=2)
+        if self.enable_mod:
+            self.cond_adaln = AdaLN(width, num_mod=2)
         self.cond_qkv_proj = nn.Linear(width, width * 3)
         self.cond_q_norm = nn.RMSNorm(width // num_head, eps=1e-6)
         self.cond_k_norm = nn.RMSNorm(width // num_head, eps=1e-6)
@@ -304,18 +321,23 @@ class DoubleStreamMultiHeadSelfAttention(nn.Module):
         self.latent_mlp = MLP(width, expansion=mlp_expansion, drop_prob=drop_prob)
         self.cond_mlp = MLP(width, expansion=mlp_expansion, drop_prob=drop_prob)
 
-    def forward(self, y, x, c):
+    def forward(self, x, c, y=None, pe=None):
         batch, length_x, width = x.shape
         batch, length_c, width = c.shape
 
-        latent_gate_mse, latent_scale_mse, latent_shift_mse, latent_gate_mlp, latent_scale_mlp, latent_shift_mlp = self.latent_adaln(y)
-        cond_gate_mse, cond_scale_mse, cond_shift_mse, cond_gate_mlp, cond_scale_mlp, cond_shift_mlp = self.cond_adaln(y)
-        
+        if self.enable_mod:
+            latent_gate_mse, latent_scale_mse, latent_shift_mse, latent_gate_mlp, latent_scale_mlp, latent_shift_mlp = self.latent_adaln(y)
+            cond_gate_mse, cond_scale_mse, cond_shift_mse, cond_gate_mlp, cond_scale_mlp, cond_shift_mlp = self.cond_adaln(y)
+            
         norm_x = self.latent_norm1(x)
         norm_c = self.cond_norm1(c)
         
-        mod_x = (1 + latent_scale_mse) * norm_x + latent_shift_mse # (B, L, W)
-        mod_c = (1 + cond_scale_mse) * norm_c + cond_shift_mse # (B, L, W)
+        if self.enable_mod:
+            mod_x = (1 + latent_scale_mse) * norm_x + latent_shift_mse # (B, L, W)
+            mod_c = (1 + cond_scale_mse) * norm_c + cond_shift_mse # (B, L, W)
+        else:
+            mod_x = norm_x
+            mod_c = norm_c
 
         latent_qkv = self.latent_qkv_proj(mod_x) # (B, L, 3W)
         cond_qkv = self.cond_qkv_proj(mod_c) # (B, L, 3W)
@@ -328,6 +350,11 @@ class DoubleStreamMultiHeadSelfAttention(nn.Module):
 
         l_q, l_k = self.latent_q_norm(l_q), self.latent_k_norm(l_k)
         c_q, c_k = self.cond_q_norm(c_q), self.cond_k_norm(c_k)# (B, H, L, D)
+
+        if pe is not None:
+            pe = pe.unsqueeze(1)
+            l_q = apply_rope(l_q, pe)
+            l_k = apply_rope(l_k, pe)
                 
         q = torch.cat([l_q, c_q], dim=-2).contiguous() # (B, H, L_x + L_c, D)
         k = torch.cat([l_k, c_k], dim=-2).contiguous() # (B, H, L_x + L_c, D)
@@ -341,19 +368,156 @@ class DoubleStreamMultiHeadSelfAttention(nn.Module):
         latent_proj_attn = self.latent_proj(latent_atten) # (B, L, W)
         cond_proj_attn = self.cond_proj(cond_atten)
         
-        latent_residual = latent_gate_mse * latent_proj_attn + x
-        cond_residual = cond_gate_mse * cond_proj_attn + c
+        if self.enable_mod:
+            latent_residual = latent_gate_mse * latent_proj_attn + x
+            cond_residual = cond_gate_mse * cond_proj_attn + c
+        else:
+            latent_residual = latent_proj_attn + x
+            cond_residual = cond_proj_attn + c
 
         ln_latent = self.latent_norm2(latent_residual)
         ln_cond = self.cond_norm2(cond_residual)
         
-        mod_latent = (1 + latent_scale_mlp) * ln_latent + latent_shift_mlp
-        mod_cond = (1 + cond_scale_mlp) * ln_cond + cond_shift_mlp
+        if self.enable_mod:
+            mod_latent = (1 + latent_scale_mlp) * ln_latent + latent_shift_mlp
+            mod_cond = (1 + cond_scale_mlp) * ln_cond + cond_shift_mlp
+        else:
+            mod_latent = ln_latent
+            mod_cond = ln_cond
         
         latent_mlp_out = self.latent_mlp(mod_latent)
         cond_mlp_out = self.cond_mlp(mod_cond)
         
-        latent_out = latent_gate_mlp * latent_mlp_out + latent_residual
-        cond_out = cond_gate_mlp * cond_mlp_out + cond_residual
+        if self.enable_mod:
+            latent_out = latent_gate_mlp * latent_mlp_out + latent_residual
+            cond_out = cond_gate_mlp * cond_mlp_out + cond_residual
+        else:
+            latent_out = latent_mlp_out + latent_residual
+            cond_out = cond_mlp_out + cond_residual
 
         return latent_out, cond_out
+
+
+
+
+##############################MASKED################################
+class MaskedMultiHeadSelfAttention(MultiHeadSelfAttention):
+    def __init__(
+        self,
+        width: int,
+        num_head: int,
+        num_latents: int,
+    ):
+        super().__init__(width, num_head, num_latents)
+
+    def forward(self, x, pe_latent=None):
+        # temporary assume uniform num = sharp num
+        batch, length, width = x.shape
+        assert  (length * width) % self.num_latents == 0
+
+        qkv = self.qkv_proj(x)
+        qkv = qkv.view(batch, self.num_latents, self.num_head, -1)
+        q, k, v = qkv.chunk(3, dim=-1)
+
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+        if pe_latent is not None:
+            q = apply_rope(q, pe_latent.unsqueeze(2))
+            k = apply_rope(k, pe_latent.unsqueeze(2))
+
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+
+        q_uniform = q[..., :q.shape[2] // 2, :]
+
+        q_sharp = q[..., q.shape[2] // 2:, :]
+        k_sharp = k[..., k.shape[2] // 2:, :]
+        v_sharp = v[..., v.shape[2] // 2:, :]
+
+        attn_uniform = F.scaled_dot_product_attention(q_uniform, k, v)
+        attn_sharp = F.scaled_dot_product_attention(q_sharp, k_sharp, v_sharp)
+        
+        attn = torch.cat([attn_uniform, attn_sharp], dim=2)
+        attn = attn.transpose(1, 2).contiguous().view(batch, self.num_latents, width)
+        attn = self.proj(attn)
+
+        return attn
+        
+class MaskedMultiHeadCrossAttention(MultiHeadCrossAttention):
+    def __init__(
+        self,
+        data_dim: int,
+        width: int,
+        num_head: int,
+        num_latents: int,
+    ):
+        super().__init__(data_dim, width, num_head, num_latents)
+
+    def forward(self, query, data, q_pe_latent=None, d_pe_latent=None):
+        # temporary assume uniform num = sharp num
+        batch, q_len, width = query.shape
+        _, data_len, data_dim = data.shape
+        
+        q = self.q_proj(query)
+        kv = self.kv_proj(data)
+
+        q = q.view(batch, q_len, self.num_head, -1)
+        kv = kv.view(batch, data_len, self.num_head, -1)
+
+        k, v = kv.chunk(2, dim=-1)
+
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+        if q_pe_latent is not None and d_pe_latent is not None:
+            q = apply_rope(q, q_pe_latent.unsqueeze(2))
+            k = apply_rope(k, d_pe_latent.unsqueeze(2))
+
+        q = q.view(batch, q_len, self.num_head, self.head_dim).transpose(1, 2)
+        k = k.view(batch, data_len, self.num_head, self.head_dim).transpose(1, 2)
+        v = v.view(batch, data_len, self.num_head, self.head_dim).transpose(1, 2)
+
+        q_uniform = q[..., :q.shape[2] // 2, :]
+        
+        q_sharp = q[..., q.shape[2] // 2:, :]
+        k_sharp = k[..., k.shape[2] // 2:, :]
+        v_sharp = v[..., v.shape[2] // 2:, :]
+         
+        attn_uniform = F.scaled_dot_product_attention(q_uniform, k, v)
+        attn_sharp = F.scaled_dot_product_attention(q_sharp, k_sharp, v_sharp)
+        
+        attn = torch.cat([attn_uniform, attn_sharp], dim=2)
+        attn = attn.transpose(1, 2).contiguous().view(batch, q_len, width)
+        attn = self.proj(attn)
+
+        return attn
+
+
+class MaskedResidualMultiHeadSelfAttention(ResidualMultiHeadSelfAttention):
+    def __init__(
+        self,
+        width: int,
+        num_head: int,
+        num_latents: int,
+        mlp_expansion: int = 4,
+        drop_prob: float = 0.
+    ):
+        super().__init__(width, num_head, num_latents, mlp_expansion, drop_prob)
+
+        self.self_attention = MaskedMultiHeadSelfAttention(width, num_head, num_latents)
+
+class MaskedResidualMultiHeadCrossAttention(ResidualMultiHeadCrossAttention):
+    def __init__(
+        self,
+        data_dim: int,
+        width: int,
+        num_head: int,
+        num_latents: int,
+        mlp_expansion: int = 4,
+        drop_prob: float = 0.
+    ):
+        super().__init__(data_dim, width, num_head, num_latents, mlp_expansion, drop_prob)
+
+        self.cross_attention = MaskedMultiHeadCrossAttention(data_dim, width, num_head, num_latents)
