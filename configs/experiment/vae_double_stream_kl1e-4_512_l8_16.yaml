@@ -1,0 +1,47 @@
+# @package _global_
+defaults:
+  - /capacity: lat512_l8_16
+  - override /model: double_stream_vae
+  - override /data: shape_vae_double_stream
+  - override /scheduler: null   
+  - _self_
+
+optimizer:
+  lr: 3.5e-5
+  weight_decay: 0
+
+model:
+  encoder_pe_dim: 52
+  decoder_pe_dim: 51
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0                
+
+trainer:
+  max_epochs: -1               
+  val_interval: 1
+  amp: true
+  resume: null                  
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: vae_double_stream_kl1e-4_512_l8_16
+  tags: [vae, lat512, deep, kl1e4, double-stream, normal-rope, converge, constant-lr]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/vae_double_stream_kl1e-4_512_l8_16/${now:%Y-%m-%d_%H-%M-%S}

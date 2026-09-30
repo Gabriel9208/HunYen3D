@@ -1,0 +1,43 @@
+# @package _global_
+# Third arm of the base-DiT / three-VAE comparison (rope_vae, anchor_vae, vanilla_vae -- same base
+# DiT architecture throughout, only the frozen VAE differs). Points at the plain VAE from the same
+# kl1e-4 lineage the rope arm's VAE came from (vae_converge_kl1e-4 -> ..._lr3.5e-6), so vanilla vs
+# rope is a matched comparison; anchor_vae is a separate lineage (kl1e-3, AnchorVAE architecture) and
+# not directly comparable on the VAE side, only on the resulting DiT numbers.
+# Already trained -- no need to relaunch:
+#   outputs/dit_xs_base_vanilla_vae/2026-08-13_21-22-15/checkpoints/best.pt  (epoch 39, val/viou_t0.7 = 70.62)
+# (moved 2026-08-20 out of outputs/dit_xs_base/, which it originally shared with the anchor_vae run
+# under a name that no longer identified which arm was which)
+# Launch (only if retraining from scratch is wanted):  +experiment=dit_xs_base_vanilla_vae
+defaults:
+  - dit_baseline
+  - override /model: mm_dit_xs
+  - _self_
+
+task:
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/vae_converge_kl1e-4_lr3.5e-6_1024_l8_16/2026-08-12_16-49-28/checkpoints/best.pt
+
+  vae:
+    _target_: src.model.shape.VAE.vae.VAE
+    num_latents: 1024
+    encoder_pe_dim: 55
+    decoder_pe_dim: 51
+    latent_dim: 64
+    width: 1024
+    num_head: 16
+    num_encoder_layers: 8
+    num_decoder_layers: 16
+
+data:
+  batch_size: 8
+
+trainer:
+  grad_accum_steps: 4
+
+wandb:
+  name: dit_xs_base_vanilla_vae
+  tags: [dit, flow-matching, mm-dit, dinov2, xs, ladder, vanilla-vae]
+
+hydra:
+  run:
+    dir: outputs/dit_xs_base_vanilla_vae/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,0 +1,49 @@
+# @package _global_
+# Full-size MM-DiT (dit_baseline capacity) on the FrameVAE checkpoint (sharp-only latent,
+# importance-query architecture), restricted to airplane/car/chair -- same capacity and category
+# scope as dit_full_air_car_chair.yaml, swapped from the plain VAE to FrameVAE + its preprocessing.
+#
+#   uv run python train.py +experiment=dit_frame_air_car_chair
+defaults:
+  - dit_baseline
+  - override /data: shape_dit_frame
+  - _self_
+
+task:
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/vae_frame_kl1e-4_1024_l8_16/2026-08-25_12-09-23/checkpoints/best.pt
+  vae:
+    _target_: src.model.shape.VAE.vae.FrameVAE
+    num_latents: 1024
+    encoder_pe_dim: 52
+    decoder_pe_dim: 51
+    latent_dim: 64
+    width: 1024
+    num_head: 16
+    num_encoder_layers: 8
+    num_decoder_layers: 16
+    rope_theta: 10000
+    rope_axes_dim: [22, 22, 20]
+    rope_coord_scale: 22.3
+
+preprocess:
+  random_sample_count: 1024    # FrameEncoder query is 100% sharp points -> needs important_sample_count=1024
+  important_sample_count: 1024 # directly (not 512+512 like the plain-VAE dit_baseline default)
+
+data:
+  train:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]   # air/car/chair, same as dit_full_air_car_chair
+  val:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]
+  test:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]
+
+wandb:
+  name: dit_frame_air_car_chair
+  tags: [dit, flow-matching, mm-dit, frame-vae, full, air-car-chair]
+
+hydra:
+  run:
+    dir: outputs/dit_frame_air_car_chair/${now:%Y-%m-%d_%H-%M-%S}

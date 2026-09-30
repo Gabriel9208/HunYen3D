@@ -1,0 +1,23 @@
+# @package _global_
+# Plain flow-matching MM-DiT (dit_baseline capacity, task=flow, self_cond=false -- vanilla, not the
+# SRA2/self-cond variant) on the disjoint-sampling VAE checkpoint (sharp FPS picked first, uniform
+# FPS seeded to avoid it). This VAE is the plain `VAE` class with the same architecture
+# configs/task/flow.yaml already defaults to (num_latents=1024, encoder_pe_dim=55, decoder_pe_dim=51,
+# latent_dim=64, width=1024, enc8/dec16) -- no task.vae override needed, only the checkpoint path and
+# the matching disjoint-sampling dataset for on-the-fly encoding.
+# Launch:  uv run python train.py +experiment=dit_disjoint_kl1e-4_lr3.5e-6_1024_l8_16
+defaults:
+  - dit_baseline
+  - override /data: shape_dit_disjoint
+  - _self_
+
+task:
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/vae_disjoint_converge_kl1e-4_lr3.5e-6_1024_l8_16/2026-08-31_02-38-28/checkpoints/best.pt
+
+wandb:
+  name: dit_disjoint_kl1e-4_lr3.5e-6_1024_l8_16
+  tags: [dit, flow-matching, mm-dit, vanilla, disjoint-fps]
+
+hydra:
+  run:
+    dir: outputs/dit_disjoint_kl1e-4_lr3.5e-6_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,0 +1,24 @@
+# @package _global_
+# SIGReg (LeJEPA) in place of the KL term, on the sampled z. A/B partner is
+# vae_disjoint_converge_kl1e-4_1024_l8_16; the only change is which regulariser shapes the latent.
+# THIS FAILED, informatively: 81% of z's variance is posterior noise and Gaussian noise already
+# satisfies the test, so SIGReg-on-z is met by the noise while mu drifts. Superseded by
+# vae_sigreg_mu_disjoint_converge_1024_l8_16. Numbers: docs/RESEARCH_LOG.md -> "SIGReg (LeJEPA) ...".
+
+# Launch:  +experiment=vae_sigreg_disjoint_converge_1024_l8_16
+defaults:
+  - vae_disjoint_converge_kl1e-4_1024_l8_16
+  - _self_
+
+task:
+  enable_sig: true
+  sig_weight: 1.0e-2
+  deterministic: false
+
+wandb:
+  name: vae_sigreg_disjoint_converge_1024_l8_16
+  tags: [vae, lat1024, deep, converge, constant-lr, disjoint-fps, sigreg, lejepa]
+
+hydra:
+  run:
+    dir: outputs/vae_sigreg_disjoint_converge_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,0 +1,54 @@
+# @package _global_
+# Scaling ladder rung XS (~140M), control arm (no anchor). Inherits dit_baseline and changes
+# only size + throughput, so the A/B against dit_xs_anchor isolates the anchor branch.
+# Launch:  +experiment=dit_xs_base
+defaults:
+  - dit_baseline
+  - override /model: mm_dit_xs
+  - _self_
+
+task:
+  # dit_baseline leaves vae_ckpt as ??? (a launch-time override). Pinned here so the run is
+  # reproducible from the config alone.
+  # This is the ANCHOR-trained VAE (same one dit_anchor_selfcond uses), fed to the plain/base DiT:
+  # self_cond and model.use_anchor stay false, so only the latents change. AnchorVAE.encode() is
+  # identical to the plain VAE's, so this isolates "are anchor-trained latents better to diffuse in".
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/anchor_converge_lr3.5e-6_1024_l8_16/2026-07-27_15-22-50/checkpoints/best.pt
+
+  # Required: task.py:126 loads with strict=True, so the module must own the checkpoint's anchor-head
+  # keys or the load raises on unexpected keys. The head is never called here (self_cond: false).
+  vae:
+    _target_: src.model.shape.VAE.vae.AnchorVAE
+    num_latents: 1024
+    encoder_pe_dim: 55
+    decoder_pe_dim: 51
+    latent_dim: 64
+    width: 1024
+    num_head: 16
+    num_encoder_layers: 8
+    num_decoder_layers: 16
+    num_anchor_layers: 6
+    detach_anchor: false
+    position_encoder:
+      _target_: src.model.shape.preprocess.FourierEmbedder
+      num_freqs: 8
+      input_dim: 3
+      include_input: true
+      include_pi: true
+
+data:
+  batch_size: 8        # 8 x 4 = effective 32, identical math to 1 x 32 but far bigger GEMMs.
+                       # At bs=1 the 140M model left 11 of 16 GB idle and starved the GPU of parallelism.
+                       # Keep this EQUAL across every rung: data.batch_size also batches validation, and
+                       # _eval_iou draws its fixed-seed noise per batch, so changing it changes the metric.
+
+trainer:
+  grad_accum_steps: 4  # effective batch stays 32 (matches dit_xs_anchor, which trained at 8 x 4)
+
+wandb:
+  name: dit_xs_base
+  tags: [dit, flow-matching, mm-dit, dinov2, xs, ladder]
+
+hydra:
+  run:
+    dir: outputs/dit_xs_base/${now:%Y-%m-%d_%H-%M-%S}

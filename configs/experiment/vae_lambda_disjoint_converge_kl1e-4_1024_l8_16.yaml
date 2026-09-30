@@ -1,0 +1,56 @@
+# @package _global_
+# lambda-VAE (arXiv:2607.05531) on the plain disjoint-sampling VAE, from scratch, at lr 3.5e-5.
+# Self-contained (composes /capacity directly) so edits elsewhere cannot silently move it; A/B
+# partner is vae_disjoint_converge_kl1e-4_1024_l8_16 with only model.lam_delta differing (0.0 -> 1.1).
+# MUST run >= 20 epochs (lam* is only fully on after ~10). Method, delta table, ramp sizing and
+# results: docs/RESEARCH_LOG.md -> "lambda-VAE (arXiv:2607.05531 ...)".
+
+# Launch:  +experiment=vae_lambda_disjoint_converge_kl1e-4_1024_l8_16
+defaults:
+  - /capacity: baseline_lat1024_l8_16   # 1024 latents, enc8/dec16, batch 2 x grad_accum 16
+  - override /data: shape_vae_disjoint  # sharp FPS first, then seeded FPS for the uniform half
+  - override /scheduler: null           # constant LR (the "converge" family)
+  - _self_
+
+model:
+  lam_delta: 1.1
+  lam_ramp_steps: 225000
+  # lam_ema / lam_max / lam_update_every keep configs/model/shape_vae.yaml's defaults (0.9 / 100 / 3000)
+
+optimizer:
+  lr: 3.5e-5
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0             # plain unweighted MSE, as in the partner
+
+trainer:
+  val_interval: 1
+  amp: true
+  resume: null
+  max_epochs: -1             # run until stopped; see the >= 20 epoch note above
+  best_metric_key: val/viou  # reconstruction quality, not the KL-inclusive training objective
+  best_metric_mode: max
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: vae_lambda_disjoint_converge_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps, lambda-vae]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/vae_lambda_disjoint_converge_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

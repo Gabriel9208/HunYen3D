@@ -1,0 +1,34 @@
+# @package _global_
+# Full-size MM-DiT (not s/xs; dit_baseline.yaml already defaults model to mm_dit), restricted to
+# airplane/car/chair, for the SRA2 capacity test and the eventual non-SRA2 baseline training run.
+#
+# Capacity test (this file's default, task=sra2fm):
+#   uv run python scripts/smoke_test.py +experiment=dit_full_air_car_chair steps=3
+# Real baseline training (no SRA2): override task back to plain flow-matching:
+#   uv run python train.py +experiment=dit_full_air_car_chair task=flow
+defaults:
+  - dit_baseline
+  - override /task: sra2fm
+  - _self_
+
+task:
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/vae_converge_kl1e-4_lr3.5e-6_1024_l8_16/2026-08-12_16-49-28/checkpoints/best.pt
+
+data:
+  train:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]
+  val:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]
+  test:
+    dataset:
+      categories: ["02691156", "02958343", "03001627"]
+
+wandb:
+  name: dit_full_air_car_chair
+  tags: [dit, flow-matching, mm-dit, sra2, full, air-car-chair]
+
+hydra:
+  run:
+    dir: outputs/dit_full_air_car_chair/${now:%Y-%m-%d_%H-%M-%S}

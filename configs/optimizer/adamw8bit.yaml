@@ -1,0 +1,8 @@
+# 8-bit AdamW (bitsandbytes): optimizer moments stored int8 (block-wise quantized, dequantized to fp32
+# for the update) -> ~4x smaller optimizer state, so the 1.1B DiT fits a 16GB GPU (fp32 AdamW OOMs).
+# _partial_ so build_optimizer binds it to model.parameters(); small params (<4096 elems) stay 32-bit.
+_target_: bitsandbytes.optim.AdamW8bit
+_partial_: true
+lr: 3e-4
+weight_decay: 0.01
+betas: [0.9, 0.999]

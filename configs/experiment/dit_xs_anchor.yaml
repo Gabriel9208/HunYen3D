@@ -1,0 +1,27 @@
+# @package _global_
+# Scaling ladder rung XS (~140M), treatment arm (anchor RoPE + self-conditioning).
+# Inherits dit_anchor_selfcond (which carries use_anchor / self_cond / AnchorVAE / its vae_ckpt)
+# and changes only size + throughput, so it differs from dit_xs_base by the anchor branch alone.
+# Launch:  +experiment=dit_xs_anchor
+defaults:
+  - dit_anchor_selfcond
+  - override /model: mm_dit_xs
+  - _self_
+
+model:
+  use_anchor: true     # re-assert: this file's _self_ is applied after mm_dit_xs, whose base
+                       # (mm_dit) defaults use_anchor to false.
+
+data:
+  batch_size: 8        # must match dit_xs_base exactly (see its comment)
+
+trainer:
+  grad_accum_steps: 4
+
+wandb:
+  name: dit_xs_anchor
+  tags: [dit, flow-matching, mm-dit, dinov2, anchor, self-cond, rope, xs, ladder]
+
+hydra:
+  run:
+    dir: outputs/dit_xs_anchor/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,0 +1,48 @@
+# @package _global_
+# Converge run of the vanilla VAE baseline: mirror of vae_baseline_1024_l8_16 (1024 tokens, enc8/dec16,
+# plain MSE, kl1e-3) but trained to convergence with a CONSTANT LR (no scheduler) and NO fixed epoch budget:
+# max_epochs=-1 loops forever until the process is manually stopped. From scratch (resume: null). This is the
+# vanilla arm of the clean anchor-vs-vanilla A/B (pairs with anchor_converge_1024_l8_16). NB (RESEARCH_LOG
+# Stage-1): constant LR floors the loss at the SGD noise ball — plateau, not the cosine-quality minimum;
+# settle later with a lower-LR resume if wanted.
+# Launch:  +experiment=vae_converge_1024_l8_16
+defaults:
+  - /capacity: lat512_l8_16
+  - override /scheduler: null   # turn off the scheduler -> constant LR
+  - _self_
+
+optimizer:
+  lr: 3.5e-5                    # constant (no scheduler)
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-3
+  recon_loss:
+    near_beta: 0                # plain unweighted MSE
+
+trainer:
+  max_epochs: -1                # infinite: train until manually stopped (last.pt saved every epoch)
+  val_interval: 1
+  amp: true
+  resume: null                  # from scratch
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: vae_converge_1024_l8_16
+  tags: [baseline, vae, lat1024, deep, kl1e3, converge, constant-lr]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/vae_converge_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

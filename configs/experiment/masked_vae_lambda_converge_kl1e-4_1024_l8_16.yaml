@@ -1,0 +1,57 @@
+# @package _global_
+# lambda-VAE (arXiv:2607.05531) stacked on the masked-attention encoder, from scratch. A/B partner
+# is masked_vae_converge_kl1e-4_1024_l8_16; only model.lam_delta differs (0.0 -> 1.1). Two changes
+# are stacked here, so use vae_lambda_disjoint_converge_* for a clean read on lambda-VAE alone.
+# MUST run >= 20 epochs (lam* is only fully on after ~10). Method, delta table and the masked
+# encoder's measured channel imbalance: docs/RESEARCH_LOG.md -> "lambda-VAE on the masked-attention encoder".
+
+# Launch:  +experiment=masked_vae_lambda_converge_kl1e-4_1024_l8_16
+defaults:
+  - /capacity: baseline_lat1024_l8_16   # 1024 latents, enc8/dec16, batch 2 x grad_accum 16
+  - override /model: masked_vae
+  - override /data: shape_vae_disjoint  # sharp FPS first, then seeded FPS for the uniform half
+  - override /scheduler: null           # constant LR (the "converge" family)
+  - _self_
+
+model:
+  lam_delta: 1.1
+  lam_ramp_steps: 225000
+  # lam_ema / lam_max / lam_update_every keep configs/model/masked_vae.yaml's defaults (0.9 / 100 / 3000)
+
+optimizer:
+  lr: 3.5e-5
+  weight_decay: 0
+
+task:
+  kl_weight: 1e-4
+  recon_loss:
+    near_beta: 0             # plain unweighted MSE, as in the partner
+
+trainer:
+  val_interval: 1
+  amp: true
+  resume: null
+  max_epochs: -1             # run until stopped; see the >= 20 epoch note above
+  best_metric_key: val/viou
+  best_metric_mode: max
+
+data:
+  train:
+    dataset:
+      fixed_seed: null
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: masked_vae_lambda_converge_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps, masked-attn, lambda-vae]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/masked_vae_lambda_converge_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

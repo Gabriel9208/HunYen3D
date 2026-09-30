@@ -1,0 +1,31 @@
+# @package _global_
+# Scaling ladder rung S (~559M), control arm (no anchor). Inherits dit_baseline and changes
+# only size + throughput, so the A/B against dit_xs_anchor isolates the anchor branch.
+# Launch:  +experiment=dit_s_base
+defaults:
+  - dit_baseline
+  - override /model: mm_dit_s
+  - _self_
+
+task:
+  # dit_baseline leaves vae_ckpt as ??? (a launch-time override). Pinned here so the run is
+  # reproducible from the config alone. NOTE: plain VAE — the anchor arm uses a different one.
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/vae_converge_lr3.5e-6_1024_l8_16/2026-07-30_13-50-19/checkpoints/best.pt
+
+data:
+  batch_size: 4        # 4 x 8 = effective 32, identical math to 1 x 32 but ~4x bigger GEMMs.
+                       # Drop to 2 (with grad_accum_steps: 16) if 559M + recompute OOMs at 16GB — but then
+                       # change dit_s_anchor identically, and cross-rung val numbers stop being comparable.
+                       # Keep this EQUAL across every rung: data.batch_size also batches validation, and
+                       # _eval_iou draws its fixed-seed noise per batch, so changing it changes the metric.
+
+trainer:
+  grad_accum_steps: 8  # effective batch stays 32 (matches every other rung and arm)
+
+wandb:
+  name: dit_s_base
+  tags: [dit, flow-matching, mm-dit, dinov2, s, ladder]
+
+hydra:
+  run:
+    dir: outputs/dit_s_base/${now:%Y-%m-%d_%H-%M-%S}

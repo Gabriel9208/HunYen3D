@@ -1,0 +1,80 @@
+# @package _global_
+# Improved DiT arm: baseline MM-DiT + anchor self-conditioning (2-pass) + 3D RoPE.
+# Mirrors dit_baseline exactly except the anchor deltas below, so the A/B isolates the anchor branch.
+#   model.use_anchor=true          -> RoPE rotates latent q/k by the anchor's predicted xyz
+#   task.self_cond=true            -> 2-pass training feeds the model its own z*-derived anchor
+#   task.vae -> AnchorVAE          -> provides the frozen anchor head (encode() is identical to plain VAE,
+#                                     so latents match the baseline; only the anchor head is extra)
+# The AnchorVAE dims MUST match its checkpoint (anchor_converge_lr3.5e-6, num_latents=1024).
+# Launch:  +experiment=dit_anchor_selfcond
+defaults:
+  - override /model: mm_dit
+  - override /task: flow
+  - override /data: shape_dit
+  - override /optimizer: adamw8bit
+  - override /scheduler: null
+  - override /loss@task.recon_loss: null
+  - _self_
+
+optimizer:
+  lr: 3.5e-5
+  weight_decay: 0
+
+model:
+  use_anchor: true              # turn on the RoPE-anchor branch (default is false in mm_dit.yaml)
+
+task:
+  cond_dropout: 0.1
+  self_cond: true               # anchor self-conditioning; asserts vae.anchor exists
+  vae_ckpt: /home/gabriel/dev/HunYen3D/outputs/anchor_converge_lr3.5e-6_1024_l8_16/2026-07-27_15-22-50/checkpoints/best.pt
+  vae:                          # swap plain VAE -> AnchorVAE (adds the anchor head; encode() unchanged)
+    _target_: src.model.shape.VAE.vae.AnchorVAE
+    num_latents: 1024
+    encoder_pe_dim: 55
+    decoder_pe_dim: 51
+    latent_dim: 64
+    width: 1024
+    num_head: 16
+    num_encoder_layers: 8
+    num_decoder_layers: 16
+    num_anchor_layers: 6
+    detach_anchor: false
+    position_encoder:
+      _target_: src.model.shape.preprocess.FourierEmbedder
+      num_freqs: 8
+      input_dim: 3
+      include_input: true
+      include_pi: true
+
+preprocess:
+  random_sample_count: 512
+  important_sample_count: 512
+  downsample_ratio: 20
+
+trainer:
+  max_epochs: -1
+  val_interval: 1
+  amp: true
+  resume: null
+  grad_accum_steps: 32   # batch 1 × 32 = effective 32 (match dit_baseline)
+  best_metric_key: val/viou_t0.7   # match dit_baseline: single-t selection (see its comment for why)
+  best_metric_mode: max
+
+data:
+  batch_size: 1
+  val:
+    dataset:
+      fixed_seed: 0
+
+wandb:
+  project: HunYen3D
+  entity: null
+  name: dit_anchor_selfcond
+  tags: [dit, flow-matching, mm-dit, dinov2, anchor, self-cond, rope]
+  mode: online
+  id: null
+  resume: allow
+
+hydra:
+  run:
+    dir: outputs/dit_anchor_selfcond/${now:%Y-%m-%d_%H-%M-%S}

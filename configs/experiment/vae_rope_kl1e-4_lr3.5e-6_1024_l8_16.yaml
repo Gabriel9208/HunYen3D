@@ -1,0 +1,29 @@
+# @package _global_
+# Continuation of vae_rope_kl1e-4_1024_l8_16 with the LR dropped 10x (3.5e-5 -> 3.5e-6), mirroring
+# vae_converge_kl1e-4_lr3.5e-6_1024_l8_16 exactly so the rope arm and the baseline arm stay a clean
+# single-knob (RoPE) A/B through BOTH stages. Resumes from best.pt, same as the baseline continuation.
+#
+# Why this is worth the GPU time even though stage 1 tied: the stage-1 test numbers came out level
+# (2026-08-18, 2592 test shapes, sample-avg K=16 — V-IoU all 74.88 vs the baseline's 75.53, uniform
+# 91.14 vs 91.34, S-IoU 67.49 vs 68.57), so the comparison currently rests on one stage only. The
+# baseline's own kl1e-3 line gained a lot from this stage, and without it the rope arm cannot be put
+# in the same table as anything in results/final_eval/summary.md, all of which ran the full pipeline.
+# Launch:  +experiment=vae_rope_kl1e-4_lr3.5e-6_1024_l8_16
+defaults:
+  - vae_rope_kl1e-4_1024_l8_16
+  - _self_
+
+optimizer:
+  lr: 3.5e-6                    # 10x lower than the source run's 3.5e-5
+
+trainer:
+  # best.pt, not last.pt — same choice the baseline continuation made, so the two stages stay aligned.
+  resume: /home/gabriel/dev/HunYen3D/outputs/vae_rope_kl1e-4_1024_l8_16/2026-08-16_16-01-07/checkpoints/best.pt
+
+wandb:
+  name: vae_rope_kl1e-4_lr3.5e-6_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e4, rope, converge, constant-lr, lr3.5e-6, resume]
+
+hydra:
+  run:
+    dir: outputs/vae_rope_kl1e-4_lr3.5e-6_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

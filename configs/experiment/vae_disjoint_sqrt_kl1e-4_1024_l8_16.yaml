@@ -1,0 +1,21 @@
+# @package _global_
+
+# Launch:  +experiment=vae_disjoint_sqrt_kl1e-4_lr3.5e-6_1024_l8_16
+defaults:
+  - vae_disjoint_converge_kl1e-4_1024_l8_16
+  - _self_
+
+task:
+  recon_loss:
+    exp: 0.5     # sqrt(|e|) per point; near_beta stays 0 (unweighted) as in the partner
+    eps: 1e-4    # REQUIRED below exp=1: at eps=0 the gradient of |e|^0.5 diverges as e->0 and NaNs.
+                 # Smoothing only acts where |e| < eps, and a batch of 50k residuals ~N(0, 0.004)
+                 # puts its smallest |e| near 1e-7 every step, so anything much below 1e-5 is inert.
+
+wandb:
+  name: vae_disjoint_sqrt_kl1e-4_1024_l8_16
+  tags: [vae, lat1024, deep, kl1e-4, converge, constant-lr, disjoint-fps, sqrt-loss]
+
+hydra:
+  run:
+    dir: outputs/vae_disjoint_sqrt_kl1e-4_1024_l8_16/${now:%Y-%m-%d_%H-%M-%S}

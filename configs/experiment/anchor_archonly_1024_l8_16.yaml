@@ -15,7 +15,7 @@ defaults:
   - _self_
 
 optimizer:
-  lr: 3e-4
+  lr: 3.5e-5
   weight_decay: 0
 
 task:

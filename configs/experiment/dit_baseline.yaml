@@ -12,13 +12,18 @@ defaults:
   - override /model: mm_dit
   - override /task: flow
   - override /data: shape_dit
+  - override /optimizer: adamw8bit         # 1.1B DiT + fp32 AdamW OOMs 16GB; 8-bit moments fit (~13.6GB)
   - override /scheduler: null              # constant LR
   - override /loss@task.recon_loss: null   # flow task has no recon_loss (root default injects one)
   - _self_
 
 optimizer:
-  lr: 1e-4
+  lr: 3.5e-5
   weight_decay: 0
+
+task:
+  cond_dropout: 0.1   # CFG training dropout -> enables guidance at sampling (Sampler.sample_ode guidance=w).
+                      # 0 disables CFG; higher trains a stronger unconditional prior for larger guidance.
 
 preprocess:
   random_sample_count: 512
@@ -30,6 +35,9 @@ trainer:
   val_interval: 1
   amp: true
   resume: null
+  grad_accum_steps: 32
+  best_metric_key: val/viou_full_ode   # select best.pt by the full ODE generative IoU
+  best_metric_mode: max
 
 data:
   batch_size: 1
