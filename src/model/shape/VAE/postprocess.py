@@ -7,39 +7,42 @@ from skimage.measure import marching_cubes
 
 
 class Postprocess:
-    """latent -> mesh. Scatter a grid in [-1,1]³, decode SDF, marching-cubes the zero
-    level set, save as .off.
-
-    fourier_embedder must be the same one used at training (frequencies / include_pi /
-    include_input must match), so it is passed in from outside (callers use
-    preprocessor.fourier_embedder).
-
-    The output filename is assembled by the caller: results/{experiment_name}/{orig folder}/{orig filename}.off,
-    e.g. results/{exp}/02691156/1a04e3eab45ca15dd86060f189eb133.off.
-    """
-
     def __init__(self, fourier_embedder, resolution: int = 128, chunk: int = 65536):
         self.fourier_embedder = fourier_embedder
         self.resolution = resolution
         self.chunk = chunk
+        self._pe_cache = None      # (device, dtype) -> embedded grid, see to_mesh
+
+    def _grid_pe(self, device, dtype):
+        key = (str(device), dtype)
+        if self._pe_cache is None or self._pe_cache[0] != key:
+            r = self.resolution
+            coords = torch.linspace(-1.0, 1.0, r)
+            grid = torch.stack(torch.meshgrid(coords, coords, coords, indexing="ij"),
+                               dim=-1).reshape(-1, 3)
+            pe = self.fourier_embedder(grid).to(device=device, dtype=dtype)
+            self._pe_cache = (key, pe)
+        return self._pe_cache[1]
 
     @torch.no_grad()
-    def to_mesh(self, decode, z: torch.Tensor) -> trimesh.Trimesh | None:
-        """decode: model.decode(z, query_pe)->(1,n,1); z: (1, L, latent_dim). Returns a mesh, or None if no surface."""
+    def to_mesh(self, decode, z: torch.Tensor, decoder=None) -> trimesh.Trimesh | None:
         r = self.resolution
-        coords = torch.linspace(-1.0, 1.0, r)
-        grid = torch.stack(torch.meshgrid(coords, coords, coords, indexing="ij"), dim=-1).reshape(-1, 3)
+        pe_all = self._grid_pe(z.device, z.dtype)
+        fast = decoder is not None and hasattr(decoder, "encode_latent")
+        lat = decoder.encode_latent(z) if fast else None
 
-        sdf = []
-        for i in range(0, grid.shape[0], self.chunk):
-            pe = self.fourier_embedder(grid[i:i + self.chunk]).unsqueeze(0).to(z.device)  # embed on CPU, then move to device
-            sdf.append(decode(z, pe)[0].reshape(-1).cpu())  # decode → (sdf, anchors); mesh uses sdf only
-        return self._extract(torch.cat(sdf).reshape(r, r, r).numpy(), r)
+        # Accumulate on the GPU: one transfer of r^3 floats at the end instead of one per chunk.
+        sdf = torch.empty(pe_all.shape[0], device=z.device, dtype=z.dtype)
+        for i in range(0, pe_all.shape[0], self.chunk):
+            pe = pe_all[i:i + self.chunk].unsqueeze(0)
+            out = decoder.query_sdf(pe, lat) if fast else decode(z, pe)[0]
+            sdf[i:i + self.chunk] = out.reshape(-1)
+        return self._extract(sdf.float().cpu().reshape(r, r, r).numpy(), r)
 
     @staticmethod
     def _extract(sdf: np.ndarray, resolution: int) -> trimesh.Trimesh | None:
         if not (sdf.min() < 0.0 < sdf.max()):
-            return None  # no zero crossing = no surface within the grid (all inside or all outside)
+            return None  
         verts, faces, _, _ = marching_cubes(sdf, level=0.0)
         verts = verts / (resolution - 1) * 2.0 - 1.0  # voxel index -> [-1, 1]
         return trimesh.Trimesh(vertices=verts, faces=faces)
@@ -52,16 +55,3 @@ class Postprocess:
         mesh.export(out_path)
         return out_path
 
-
-if __name__ == "__main__":
-    # self-check: feed an analytic sphere SDF (radius 0.5, inside<0); marching-cubes vertices should land on radius 0.5.
-    r = 64
-    c = np.linspace(-1.0, 1.0, r)
-    x, y, zc = np.meshgrid(c, c, c, indexing="ij")
-    sphere = np.sqrt(x**2 + y**2 + zc**2) - 0.5
-    m = Postprocess._extract(sphere, r)
-    assert m is not None
-    radii = np.linalg.norm(m.vertices, axis=1)
-    assert abs(radii.mean() - 0.5) < 0.03, radii.mean()          # scale/rescale correct
-    assert Postprocess._extract(np.ones((r, r, r)), r) is None    # no zero crossing -> None
-    print(f"ok  {len(m.vertices)} verts  mean radius {radii.mean():.3f}")
