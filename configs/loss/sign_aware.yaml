@@ -1,5 +1,0 @@
-_target_: src.engine.task.SignAwareSDFLoss
-near_weight: 4.0
-near_beta: 100.0     # the β that won the sweep
-sign_weight: 0.1     # α: weight of the sign term vs the distance term; 0 reverts to plain weighted MSE. Sweep {0.03,0.1,0.3}
-sign_temp: 30.0      # k: sigmoid steepness, sign-gradient band ~3/k. Sweep {10,30,100}

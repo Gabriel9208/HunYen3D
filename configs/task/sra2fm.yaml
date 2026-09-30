@@ -1,0 +1,31 @@
+# SRA2-aligned flow-matching DiT task. Same base as flow.yaml (encodes latents on the fly with a
+# frozen trained VAE, flow-matching velocity loss), plus a representation-alignment loss: a probed
+# DiT hidden state (layer `probe_layer`) is projected by `sra2` and regressed toward the clean VAE
+# latent z with smooth-L1 (beta=0.05), weighted by lambda_sra2. See SRA2 paper (arXiv 2601.17830).
+_target_: src.engine.task.SRA2FMTask
+vae_ckpt: ???       # required: path to trained VAE .pt (override on launch)
+cond_dropout: 0.1
+self_cond: false
+eval_t: [0.3, 0.5, 0.7]
+probe_layer: 2      # will be swept later; fine as a placeholder for the capacity test
+lambda_sra2: 1.0     # paper's ablation-selected weight
+sra2fm:
+  _target_: src.model.shape.diffusion.flow_matching.SRA2FM
+  std: 1.0
+  mean: 0.0
+  shift_scale: 3.0
+sra2:
+  _target_: src.model.general.sra2.SRA2
+  in_dim: 1024   # must match the applied model's `width`
+  out_dim: 64    # must match vae.latent_dim below
+  layers: 5
+vae:
+  _target_: src.model.shape.VAE.vae.VAE
+  num_latents: 1024
+  encoder_pe_dim: 55
+  decoder_pe_dim: 51
+  latent_dim: 64
+  width: 1024
+  num_head: 16
+  num_encoder_layers: 8
+  num_decoder_layers: 16

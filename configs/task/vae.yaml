@@ -1,5 +1,8 @@
 _target_: src.engine.task.VAETask
 kl_weight: 1.0e-3
+sig_weight: 1.0e-4      # LeJEPA SIGReg weight; only used when enable_sig=true. SIGReg reads mu, and
+                        # runs ALONGSIDE the KL term (which stays as the scale anchor) -- not instead of it.
+enable_sig: false       # true -> loss = recon + kl_weight*KL + sig_weight*SIGReg(mu)
 deterministic: false   # true → train on z=μ (no sampling); used by grid_overfit's pure-capacity gate
 anchor_chamfer_weight: 0.0  # AnchorVAE only: chamfer(anchors, FPS query xyz), 主. 0 → non-anchor runs unchanged
 anchor_mse_weight: 0.0      # AnchorVAE only: index-aligned MSE(anchors, FPS query xyz), 輔

@@ -38,6 +38,9 @@ def build_dataloaders(cfg: DictConfig):
         shuffle=True,
         num_workers=cfg.num_workers,
         drop_last=True,
+        pin_memory=True,          
+        persistent_workers=True,  
+        prefetch_factor=4,
     )
     val_loader = DataLoader(
         val_ds,

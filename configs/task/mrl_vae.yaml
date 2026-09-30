@@ -1,0 +1,8 @@
+_target_: src.engine.task.MRLVAETask
+m_values: [8, 16, 32, 64]
+m_weights: [1, 1, 1, 1]
+m_exponents: null        # one recon exponent per m, e.g. [2.0, 1.5, 1.0, 0.5]; null = plain MSE for all
+kl_weight: 1.0e-3
+deterministic: false
+anchor_chamfer_weight: 0.0
+anchor_mse_weight: 0.0
