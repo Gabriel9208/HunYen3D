@@ -107,12 +107,6 @@ class FourierEmbedder(nn.Module):
 
 
 class Mesh2Query(nn.Module):
-    """Mesh sampling primitives (the heavy-side parts). Turns a mesh into raw geometry
-    samples: surface point cloud + normals, near-surface / uniform SDF supervision points.
-    Does no Fourier and no IO. `Preprocessor` composes these primitives into
-    build_cache (heavy) / sample (light).
-    """
-
     def __init__(self):
         super().__init__()
 
@@ -275,16 +269,16 @@ class Preprocessor(nn.Module):
     def __init__(
         self,
         pe_freqs: int = 6,
-        in_channels: int = 6,          # channels per surface point: xyz(3) + normal(3)
+        in_channels: int = 6,          
         include_input: bool = True,
         include_pi: bool = True,       # whether Fourier frequencies are multiplied by π (official vae-v2-1 uses false)
         random_sample_count: int = 4096,
         important_sample_count: int = 2048,
-        downsample_ratio: int = 20,    # KV points per branch = downsample_ratio * that branch's query count (Hunyuan derive)
+        downsample_ratio: int = 20,   
         num_surface_samples: int = 249856,
         n_query_surface: int = 200_000,
         n_query_uniform: int = 50_000,
-        sdf_sample_point_count: int = 2_000_000,  # mesh_to_sdf surface sample count (heavy; affects accuracy and speed)
+        sdf_sample_point_count: int = 2_000_000,  
         sdf_subset: int | None = None,  # SDF points supervised per sample (None = use the whole bank)
     ):
         super().__init__()
@@ -303,7 +297,7 @@ class Preprocessor(nn.Module):
         self.sdf_subset = sdf_subset
 
         self.mesh2query = Mesh2Query()
-        # Fourier only on xyz (3 dims); normals do not go through Fourier.
+
         self.fourier_embedder = FourierEmbedder(
             num_freqs=pe_freqs,
             input_dim=3,
@@ -311,19 +305,16 @@ class Preprocessor(nn.Module):
             include_pi=include_pi,
         )
 
-    # ---- dims (to match the model's pe_dim; configs' encoder/decoder_pe_dim must agree with these) ----
     @property
-    def decoder_pe_dim(self) -> int:        # SDF query points: only xyz goes through Fourier
+    def decoder_pe_dim(self) -> int:       
         return self.fourier_embedder.out_dim
 
     @property
-    def encoder_pe_dim(self) -> int:        # surface points: Fourier(xyz) + normal
+    def encoder_pe_dim(self) -> int:      
         return self.fourier_embedder.out_dim + (self.in_channels - 3)
 
     @property
     def cache_signature(self) -> dict:
-        # Only the heavy params that affect the big pool / SDF bank contents; changing light params
-        # (downsample_ratio/random/important/pe/sdf_subset) does not require rebuilding the cache.
         return {
             "num_surface_samples": self.num_surface_samples,
             "n_query_surface": self.n_query_surface,
@@ -331,12 +322,11 @@ class Preprocessor(nn.Module):
             "sdf_sample_point_count": self.sdf_sample_point_count,
         }
 
-    # ---- heavy: offline once ----
     def build_cache(self, mesh_path: str) -> dict:
         if not os.path.exists(mesh_path):
             raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
         if mesh_path.endswith(".gz"):
-            inner = os.path.splitext(mesh_path[:-3])[1].lstrip(".")  # e.g. "off"
+            inner = os.path.splitext(mesh_path[:-3])[1].lstrip(".")  # ex. "off"
             with gzip.open(mesh_path, "rb") as f:
                 mesh = trimesh.load(f, file_type=inner, force="mesh")
         else:
@@ -358,18 +348,14 @@ class Preprocessor(nn.Module):
             "signature": self.cache_signature,
         } 
 
-    # ---- light: every epoch ----
     def sample(self, cache: dict):
-        # KV (data) = downsample_ratio * query, per branch — mirrors Hunyuan's derive so the ratio stays
-        # fixed instead of drifting with num_latents. ponytail: downsample() caps at pool size, so keep
-        # downsample_ratio * max(random, important) <= num_surface_samples (else the ratio silently drops).
         surf = self.mesh2query.downsample(cache["surface_pool"], self.downsample_ratio * self.random_sample_count)
         sharp = self.mesh2query.downsample(cache["sharp_pool"], self.downsample_ratio * self.important_sample_count)
         surf_fps = self.mesh2query.fps(surf, self.random_sample_count)
         sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
 
-        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important = num_latents, 7)
-        data = torch.cat([surf, sharp], dim=0)            # (downsample_ratio * (random + important), 7)
+        query = torch.cat([surf_fps, sharp_fps], dim=0)   
+        data = torch.cat([surf, sharp], dim=0)            
 
         qp = cache["sdf_query_points"]
         gt = cache["gt_sdf"]
@@ -382,8 +368,8 @@ class Preprocessor(nn.Module):
         _, d_emb, d_normal = self._embed_surface(data)
         d = torch.cat([d_emb, d_normal], dim=-1)
 
-        sdf_query_points = self.fourier_embedder(qp)   # xyz only
-        query_xyz = query[:, :3]                       # raw FPS query coords (num_latents, 3): anchor GT
+        sdf_query_points = self.fourier_embedder(qp)   
+        query_xyz = query[:, :3]                       
         return q, d, sdf_query_points, gt, query_xyz
 
     def sample_disjoint(self, cache: dict): # sharp -> uniform
@@ -392,8 +378,8 @@ class Preprocessor(nn.Module):
         sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
         surf_fps = self.mesh2query.fps(surf, self.random_sample_count, seeds=sharp_fps)
 
-        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important = num_latents, 7)
-        data = torch.cat([surf, sharp], dim=0)            # (downsample_ratio * (random + important), 7)
+        query = torch.cat([surf_fps, sharp_fps], dim=0)   
+        data = torch.cat([surf, sharp], dim=0)            
 
         qp = cache["sdf_query_points"]
         gt = cache["gt_sdf"]
@@ -411,16 +397,13 @@ class Preprocessor(nn.Module):
         return q, d, sdf_query_points, gt, query_xyz
 
     def double_stream_sample(self, cache: dict):
-        # KV (data) = downsample_ratio * query, per branch — mirrors Hunyuan's derive so the ratio stays
-        # fixed instead of drifting with num_latents. ponytail: downsample() caps at pool size, so keep
-        # downsample_ratio * max(random, important) <= num_surface_samples (else the ratio silently drops).
         surf = self.mesh2query.downsample(cache["surface_pool"], self.downsample_ratio * self.random_sample_count)
         sharp = self.mesh2query.downsample(cache["sharp_pool"], self.downsample_ratio * self.important_sample_count)
         surf_fps = self.mesh2query.fps(surf, self.random_sample_count)
         sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
 
-        query = torch.cat([surf_fps, sharp_fps], dim=0)   # (random + important = num_latents, 7)
-        data = torch.cat([surf, sharp], dim=0)            # (downsample_ratio * (random + important), 7)
+        query = torch.cat([surf_fps, sharp_fps], dim=0)   
+        data = torch.cat([surf, sharp], dim=0)            
 
         qp = cache["sdf_query_points"]
         gt = cache["gt_sdf"]
@@ -444,16 +427,12 @@ class Preprocessor(nn.Module):
         return q_xyz, d_xyz, q_normal, d_normal, q_emb, d_emb, sdf_query_points, gt
 
     def frame_sample(self, cache: dict):
-        # FrameEncoder's query is 100% importance points -- unlike double_stream_sample, the uniform
-        # branch's query FPS is never computed here (FrameEncoder discards it, so computing it would
-        # be a wasted FPS pass + embedding). The KV/data side is unchanged: both cross-attention
-        # branches still read their own downsampled pool.
         surf = self.mesh2query.downsample(cache["surface_pool"], self.downsample_ratio * self.random_sample_count)
         sharp = self.mesh2query.downsample(cache["sharp_pool"], self.downsample_ratio * self.important_sample_count)
         sharp_fps = self.mesh2query.fps(sharp, self.important_sample_count)
 
-        query = sharp_fps                                 # (important = num_latents, 7)
-        data = torch.cat([surf, sharp], dim=0)             # (downsample_ratio * (random + important), 7)
+        query = sharp_fps                                 
+        data = torch.cat([surf, sharp], dim=0)            
 
         qp = cache["sdf_query_points"]
         gt = cache["gt_sdf"]
@@ -477,11 +456,8 @@ class Preprocessor(nn.Module):
         return q_xyz, d_xyz, q_normal, d_normal, q_emb, d_emb, sdf_query_points, gt
 
     def _embed_surface(self, pts: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # pts: (L, in_channels) = [xyz(3) | normal(in_channels-3)]; Fourier acts on xyz only.
         xyz, normal = pts.split([3, pts.shape[-1] - 3], dim=-1)
         return xyz, self.fourier_embedder(xyz), normal
 
-
-    # ---- heavy mode (on the fly) ----
     def forward(self, mesh_path: str):
         return self.sample(self.build_cache(mesh_path))

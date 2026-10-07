@@ -18,12 +18,6 @@ class Gaussian():
         self.var = torch.exp(self.logvar)
 
     def sample(self, lam=None):
-        # lam: lambda-VAE (arXiv:2607.05531) per-channel exponent -> z = mu + sigma^lam * eps (Eq.9).
-        # kl_divergence() is deliberately left alone: charging the KL for the ORIGINAL sigma while
-        # the decoder only sees the reduced noise is the entire mechanism (Eq.10).
-        # The min is Eq.16's max(1, .) applied ELEMENTWISE and taken in LOG SPACE. Both details are
-        # load-bearing -- each NaN'd a real run. See docs/RESEARCH_LOG.md -> "lambda-VAE
-        # implementation: two NaN incidents".
         eps = torch.randn_like(self.std)
         if lam is None:
             return self.mu + eps * self.std
@@ -60,10 +54,7 @@ class VAE(nn.Module):
         self.lam_ema = lam_ema
         self.lam_max = lam_max
         self.lam_update_every = lam_update_every
-        # persistent=False: these are derived schedule state, not weights. Keeping them out of
-        # state_dict means every checkpoint trained before lambda-VAE existed still loads, and a
-        # lambda run's own checkpoints stay loadable by the DiT task and the diagnostic scripts.
-        # Cost: a resume reseeds the EMA from its first window and restarts the ramp.
+
         self.register_buffer("sigma_ema", torch.full((latent_dim,), float("nan")), persistent=False)
         self.register_buffer("sigma_acc", torch.zeros(latent_dim), persistent=False)
         self.register_buffer("acc_n", torch.zeros((), dtype=torch.long), persistent=False)
@@ -114,8 +105,6 @@ class VAE(nn.Module):
             return 1.0 + ramp * (self.lam_star - 1.0)   # paper's guard against premature compression
 
     def encode(self, query, data, sample_posterior: bool = True, return_mean=False):
-        # sample_posterior=False → z=μ (deterministic, distribution.mode()); used by the pure-capacity
-        # overfit so σ is never sampled → no σ-explosion even at kl=0. Mirrors Hunyuan's encode flag.
         mu, logvar = self.encoder(query, data)
         distribution = Gaussian(mu, logvar)
         if sample_posterior:
@@ -125,7 +114,7 @@ class VAE(nn.Module):
         kl = distribution.kl_divergence()
 
         if return_mean:
-            return z, kl, distribution.mode()   # mu, for regularisers that must not see the noise
+            return z, kl, distribution.mode()  
 
         return z, kl
 
@@ -232,7 +221,7 @@ class AnchorVAE(VAE):
         )
 
         self.pe = position_encoder
-        self.detach_anchor = detach_anchor  # True → anchor branch gets no gradient into z/encoder
+        self.detach_anchor = detach_anchor 
 
         self.decoder = AnchorDecoder(
             num_latents=num_latents,
@@ -244,10 +233,10 @@ class AnchorVAE(VAE):
         )
         
     def decode(self, z, query_pe):
-        z_anchor = z.detach() if self.detach_anchor else z  # cut anchor-branch gradient to z/encoder when set
+        z_anchor = z.detach() if self.detach_anchor else z 
         anchors = self.anchor(z_anchor)
         pe_anchors = self.pe(anchors)
-        reconstructed = self.decoder(query_pe, z, pe_anchors)  # decoder still gets non-detached z (recon path intact)
+        reconstructed = self.decoder(query_pe, z, pe_anchors) 
         return reconstructed, anchors
 
 class DoubleStreamVAE(VAE):
