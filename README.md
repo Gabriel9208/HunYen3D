@@ -7,7 +7,7 @@ forked; the few blocks taken from the Hunyuan3D-2.1 release are marked as such i
 
 ---
 
-## At a glance
+## Summary
 
 - **The problem identified.** In this re-implementation of the Hunyuan3D-2 shape autoencoder, **half
   of the latent tokens carry very little information**. The half that falls silent is almost
@@ -39,10 +39,10 @@ measurements.*
 
 ---
 
-## Background: why the latent space of a 3D generator is worth studying
+## Background
 
 Generating 3D objects formerly meant generating 2D images and lifting them into three dimensions.
-As large 3D datasets became available, the field moved to training directly on 3D data. A common
+As large 3D datasets became available, the field moved to training directly on 3D data. One common
 formulation has two stages: an autoencoder compresses a 3D shape into a compact **latent
 representation** (a small set of numbers standing in for the whole object), and a diffusion model
 then learns to generate new points within that compressed space.
@@ -139,7 +139,7 @@ is the one intended to carry sharp detail.
 
 ---
 
-## Two explanations that proved incorrect
+## Two Attempts
 
 Two hypotheses were tested and rejected before the explanation given below emerged.
 
